@@ -8,12 +8,15 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 
-# Create database engine
+# Create database engine with UTC timezone
 engine = create_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,  # Log SQL queries in debug mode
     pool_pre_ping=True,   # Verify connections before use
-    pool_recycle=300      # Recycle connections every 5 minutes
+    pool_recycle=300,     # Recycle connections every 5 minutes
+    connect_args={
+        "init_command": "SET time_zone = '+00:00'"  # Force UTC timezone
+    }
 )
 
 # Create session factory

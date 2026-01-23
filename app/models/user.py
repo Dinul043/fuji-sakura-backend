@@ -6,7 +6,7 @@ SQLAlchemy model for users table - Main user data only
 from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.database import Base
 
 class User(Base):
@@ -25,10 +25,11 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     
     # Timestamps (all in UTC)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
-    last_login = Column(DateTime(timezone=True), nullable=True)
-    deleted_at = Column(DateTime(timezone=True), nullable=True)  # Soft delete for future
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), 
+                       onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    last_login = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)  # Soft delete for future
     
     # Relationship with tokens (one-to-many)
     tokens = relationship("UserToken", back_populates="user", cascade="all, delete-orphan")
