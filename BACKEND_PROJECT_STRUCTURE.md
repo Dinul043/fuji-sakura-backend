@@ -3,277 +3,342 @@
 ## 🏗️ Architecture Overview
 FastAPI-based REST API with MySQL database, JWT authentication, and email integration via Mailtrap.
 
-## 📁 Project Structure
+## 📁 Project Structure & Frontend Connections
 
 ```
 food-delivery-backend/
 ├── app/
 │   ├── core/
 │   │   ├── __init__.py
-│   │   ├── config.py          # Configuration settings
-│   │   └── database.py        # Database connection & session management
+│   │   ├── config.py          # App settings & environment variables
+│   │   └── database.py        # MySQL connection for all frontend data
 │   ├── models/
 │   │   ├── __init__.py
-│   │   ├── user.py           # User SQLAlchemy model
-│   │   └── user_token.py     # UserToken SQLAlchemy model
+│   │   ├── user.py           # Customer accounts (login/signup pages)
+│   │   ├── user_token.py     # OTP verification (signup/forgot password)
+│   │   ├── admin.py          # Admin accounts (admin portal)
+│   │   └── restaurant_application.py  # Restaurant applications (partnership)
 │   ├── routes/
 │   │   ├── __init__.py
-│   │   └── auth.py           # Authentication endpoints
+│   │   ├── auth.py           # Customer authentication APIs
+│   │   ├── admin_auth.py     # Admin authentication APIs
+│   │   └── restaurant.py     # Restaurant application APIs
 │   ├── utils/
 │   │   ├── __init__.py
-│   │   ├── email.py          # Email sending utilities (Mailtrap)
-│   │   ├── otp.py            # OTP generation & validation
+│   │   ├── email.py          # Mailtrap email sending (OTP/reset emails)
+│   │   ├── otp.py            # 4-digit OTP generation & validation
 │   │   └── security.py       # Password hashing & JWT tokens
 │   └── __init__.py
-├── .env                      # Environment variables (gitignored)
+├── .env                      # Environment variables (database, email config)
 ├── .env.example             # Environment template
 ├── .gitignore               # Git ignore rules
-├── database_migration.sql   # Database migration script (two-table structure)
+├── database_migration.sql   # Database setup script
 ├── main.py                  # FastAPI application entry point
 ├── requirements.txt         # Python dependencies
-├── BACKEND_PROJECT_STRUCTURE.md  # This documentation
-└── SQL_QUERIES_REFERENCE.md      # SQL query examples
+└── BACKEND_PROJECT_STRUCTURE.md  # This documentation
 ```
 
-## 🔧 Core Components
+## 🔗 Frontend-Backend Connection Map
 
-### 1. **Database Configuration** (`app/core/`)
-- **config.py**: Environment-based settings management
-- **database.py**: SQLAlchemy engine, session factory, and dependency injection
+### **Customer Authentication Flow**
+```
+Frontend Pages → Backend APIs → Database Tables
+─────────────────────────────────────────────────
+/login (signup)     → POST /api/auth/signup        → users + user_tokens
+/login (OTP)        → POST /api/auth/verify-otp    → user_tokens (cleanup)
+/login (signin)     → POST /api/auth/login         → users (authentication)
+/forgot-password    → POST /api/auth/forgot-password → user_tokens (reset)
+/forgot-password    → POST /api/auth/reset-password  → users (password update)
+```
 
-### 2. **Data Models** (`app/models/`)
-- **user.py**: Main user model with core user data
-  - Fields: id, email, name, password, is_verified, is_active
-  - Timestamps: created_at, updated_at, last_login, deleted_at
-  - Relationship: One-to-many with UserToken
-- **user_token.py**: Temporary token model for OTP and reset tokens
-  - Fields: id, user_id (FK), otp, otp_expires_at, reset_token, reset_token_expires_at
-  - Auto-deleted when user is deleted (CASCADE)
-  - Automatically cleared after successful verification
+### **Admin System Flow**
+```
+Frontend Pages → Backend APIs → Database Tables
+─────────────────────────────────────────────────
+/admin              → POST /api/admin/login       → admins (authentication)
+/admin/dashboard    → GET /api/admin/verify       → admins (session check)
+/admin/dashboard    → GET /api/restaurant/applications → restaurant_applications
+/admin/dashboard    → PUT /api/restaurant/applications/{id}/status → restaurant_applications (approve/reject)
+```
 
-### 3. **API Routes** (`app/routes/`)
-- **auth.py**: Complete authentication system
-  - `POST /signup` - User registration with OTP
-  - `POST /verify-otp` - Email verification
-  - `POST /login` - User authentication
-  - `POST /resend-otp` - Resend verification code
-  - `POST /forgot-password` - Password reset request
-  - `POST /reset-password` - Password reset with token
-  - `PUT /update-user-details` - Update user info after verification
+### **Restaurant Partnership Flow**
+```
+Frontend Pages → Backend APIs → Database Tables
+─────────────────────────────────────────────────
+/restaurant/apply   → POST /api/restaurant/apply  → restaurant_applications (new application)
+```
 
-### 4. **Utilities** (`app/utils/`)
-- **security.py**: Password hashing (bcrypt) & JWT token management
-- **otp.py**: 4-digit OTP generation & expiration handling
-- **email.py**: Mailtrap SMTP integration for OTP & reset emails
+## 🗂️ Detailed Folder Explanations
 
-## 🔐 Authentication Flow
+### **1. `app/core/` - Foundation Layer**
+**Purpose**: Core application configuration and database connectivity
+**Frontend Connection**: 
+- `config.py` → Manages all environment settings (database URL, JWT secrets, email config)
+- `database.py` → Provides MySQL connection for all frontend data operations
 
-### User Registration (Sign Up)
-1. **Email Submission** → Creates user with temp data + generates OTP
-2. **OTP Email** → Sent via Mailtrap (4-digit code, 10min expiry)
-3. **OTP Verification** → Activates account (`is_verified = true`)
-4. **Details Update** → User provides real name/password
-5. **Complete Registration** → User logged in & redirected
+**What it does for frontend**:
+- Ensures all API calls have database connectivity
+- Manages application-wide settings like JWT expiry times
+- Handles database session management for all user interactions
 
-### User Login (Sign In)
-1. **Credentials Check** → Email/password validation
-2. **Account Verification** → Must be verified to login
-3. **JWT Token** → Generated for authenticated sessions
-4. **Login Success** → User redirected to dashboard
+### **2. `app/models/` - Data Layer**
+**Purpose**: Database table definitions and data operations
+**Frontend Connection**: Each model directly corresponds to frontend functionality
 
-## 🗄️ Database Schema (Two-Table Structure)
+#### **`user.py` - Customer Data**
+- **Frontend Pages**: `/login`, `/home`, `/cart`, `/checkout`, `/orders`
+- **What it stores**: Customer accounts, login sessions, user preferences
+- **Frontend Usage**: Every customer login, signup, and profile operation
 
-### Users Table (Main Data)
+#### **`user_token.py` - Temporary Data**
+- **Frontend Pages**: `/login` (OTP verification), `/forgot-password`
+- **What it stores**: 4-digit OTP codes, password reset tokens
+- **Frontend Usage**: Email verification during signup, password reset flow
+
+#### **`admin.py` - Admin Data**
+- **Frontend Pages**: `/admin`, `/admin/dashboard`
+- **What it stores**: Admin accounts, login sessions, permissions
+- **Frontend Usage**: Admin authentication and session management
+
+#### **`restaurant_application.py` - Partnership Data**
+- **Frontend Pages**: `/restaurant/apply`, `/admin/dashboard`
+- **What it stores**: Restaurant applications, approval status, admin notes
+- **Frontend Usage**: Restaurant partnership applications and admin review process
+
+### **3. `app/routes/` - API Layer**
+**Purpose**: HTTP endpoints that frontend calls directly
+**Frontend Connection**: Each route file serves specific frontend pages
+
+#### **`auth.py` - Customer APIs**
+**Serves Frontend Pages**: `/login`, `/forgot-password`
+**API Endpoints**:
+- `POST /signup` → Customer registration form
+- `POST /verify-otp` → OTP verification step
+- `POST /login` → Customer login form
+- `POST /forgot-password` → Password reset request
+- `POST /reset-password` → New password submission
+
+#### **`admin_auth.py` - Admin APIs**
+**Serves Frontend Pages**: `/admin`, `/admin/dashboard`
+**API Endpoints**:
+- `POST /login` → Admin login form
+- `GET /verify` → Dashboard session validation (every minute)
+
+#### **`restaurant.py` - Restaurant APIs**
+**Serves Frontend Pages**: `/restaurant/apply`, `/admin/dashboard`
+**API Endpoints**:
+- `POST /apply` → Restaurant application form
+- `GET /applications` → Admin dashboard application list
+- `PUT /applications/{id}/status` → Admin approve/reject actions
+
+### **4. `app/utils/` - Service Layer**
+**Purpose**: Shared utilities used across all frontend operations
+**Frontend Connection**: Behind-the-scenes services for frontend features
+
+#### **`security.py` - Authentication Services**
+- **Frontend Usage**: Every login, signup, and session management
+- **What it provides**: Password hashing, JWT token creation/validation
+- **Connected to**: All authentication forms and protected pages
+
+#### **`email.py` - Email Services**
+- **Frontend Usage**: Signup OTP, password reset, application notifications
+- **What it provides**: Mailtrap email sending with HTML templates
+- **Connected to**: OTP verification, password reset flow
+
+#### **`otp.py` - Verification Services**
+- **Frontend Usage**: Signup verification, password reset
+- **What it provides**: 4-digit OTP generation, expiry management
+- **Connected to**: Email verification steps in signup/reset flows
+
+## 🔄 Complete User Journey Examples
+
+### **Customer Signup Journey**
+1. **Frontend**: User fills signup form at `/login`
+2. **Backend**: `POST /api/auth/signup` → Creates user in `users` table
+3. **Backend**: `otp.py` generates 4-digit code → Stores in `user_tokens` table
+4. **Backend**: `email.py` sends OTP via Mailtrap
+5. **Frontend**: User enters OTP at `/login`
+6. **Backend**: `POST /api/auth/verify-otp` → Validates and activates user
+7. **Backend**: Cleans up `user_tokens` table automatically
+8. **Frontend**: User redirected to `/home`
+
+### **Admin Review Journey**
+1. **Frontend**: Admin logs in at `/admin`
+2. **Backend**: `POST /api/admin/login` → Validates against `admins` table
+3. **Frontend**: Admin accesses `/admin/dashboard`
+4. **Backend**: `GET /api/restaurant/applications` → Fetches from `restaurant_applications`
+5. **Frontend**: Admin clicks approve/reject
+6. **Backend**: `PUT /api/restaurant/applications/{id}/status` → Updates status + admin_id
+7. **Frontend**: Beautiful notification shows success
+8. **Backend**: Records which admin made the decision
+
+### **Restaurant Application Journey**
+1. **Frontend**: Restaurant owner fills form at `/restaurant/apply`
+2. **Backend**: `POST /api/restaurant/apply` → Creates application in `restaurant_applications`
+3. **Frontend**: Success page with application confirmation
+4. **Backend**: Application appears in admin dashboard
+5. **Frontend**: Admin reviews and approves/rejects
+6. **Backend**: Status updated with admin tracking
+
+## 🛡️ Security Implementation
+
+### **Authentication Flow**
+- **Frontend**: Login forms collect credentials
+- **Backend**: `security.py` validates passwords with bcrypt
+- **Database**: Only hashed passwords stored in `users`/`admins` tables
+- **Frontend**: JWT tokens stored in localStorage for session management
+
+### **Session Management**
+- **Frontend**: 10-minute admin session timer with warnings
+- **Backend**: JWT tokens with configurable expiry
+- **Database**: Admin login tracking in `admins.last_login`
+
+### **Data Protection**
+- **Frontend**: Input validation on all forms
+- **Backend**: SQL injection protection via SQLAlchemy ORM
+- **Database**: Foreign key constraints and data integrity
+
+## 📊 Database Relationships
+
 ```sql
-CREATE TABLE users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    password VARCHAR(255) NOT NULL,
-    is_verified BOOLEAN DEFAULT FALSE,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    last_login TIMESTAMP NULL,
-    deleted_at TIMESTAMP NULL
+-- Customer System
+users (1) ←→ (many) user_tokens  -- One user can have multiple temp tokens
+
+-- Admin System  
+admins (1) ←→ (many) restaurant_applications  -- One admin reviews many applications
+
+-- Application Tracking
+restaurant_applications.reviewed_by → admins.id  -- Track which admin approved
+```
+
+## 👨‍💼 Admin Management
+
+### **Adding New Admin Accounts**
+Admins are created manually in the database for security. Follow these steps:
+
+#### **Step 1: Hash the Password**
+```python
+# Use Python to hash the password
+from app.utils.security import hash_password
+hashed_password = hash_password("your_admin_password")
+print(hashed_password)
+```
+
+#### **Step 2: Insert into Database**
+```sql
+INSERT INTO admins (name, email, password_hash, is_active, created_at, updated_at) 
+VALUES (
+    'Admin Name', 
+    'admin@company.com', 
+    'hashed_password_from_step_1', 
+    1, 
+    NOW(), 
+    NOW()
 );
 ```
 
-### User Tokens Table (Temporary Data)
+#### **Step 3: Test Login**
+- Go to `/admin` portal
+- Login with the new email and password
+- Verify access to `/admin/dashboard`
+
+### **Removing Admin Access**
 ```sql
-CREATE TABLE user_tokens (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    otp VARCHAR(6) NULL,
-    otp_expires_at TIMESTAMP NULL,
-    reset_token VARCHAR(6) NULL,
-    reset_token_expires_at TIMESTAMP NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+-- Deactivate admin (recommended - preserves audit trail)
+UPDATE admins SET is_active = 0 WHERE email = 'admin@company.com';
+
+-- Or completely remove (not recommended)
+DELETE FROM admins WHERE email = 'admin@company.com';
 ```
 
-### Benefits of Two-Table Structure:
-- **Cleaner main table**: Users table only contains permanent data
-- **Better performance**: Smaller main table for frequent queries
-- **Automatic cleanup**: Tokens auto-deleted when user is deleted
-- **Future-ready**: Easy to add features like email updates, account deletion
-- **Security**: Temporary sensitive data isolated and auto-cleared
+### **Current Admin Accounts**
+- **latheefdinul@gmail.com** (Admin ID: 1) - Primary administrator
+- Password: dinulasan1
 
-## 📧 Email Integration
+## 🚀 Production Deployment
 
-### Mailtrap Configuration
-- **SMTP Server**: sandbox.smtp.mailtrap.io:2525
-- **Authentication**: Username/Password based
-- **Email Templates**: OTP verification & password reset
-- **Testing**: All emails captured in Mailtrap inbox
-
-### Email Types
-1. **OTP Verification**: 4-digit code for account activation
-2. **Password Reset**: 4-digit token for password recovery
-3. **Welcome Email**: Account creation confirmation (future)
-
-## 🔑 Security Features
-
-### Password Security
-- **Hashing**: bcrypt with salt rounds
-- **Validation**: Minimum 8 chars, 5 uppercase, 1 lowercase, 1 number
-- **Storage**: Only hashed passwords stored
-
-### JWT Tokens
-- **Algorithm**: HS256
-- **Expiry**: 30 days
-- **Claims**: User ID in subject field
-- **Secret**: Environment-based secret key
-
-### OTP Security
-- **Length**: 4 digits (manager preference)
-- **Expiry**: 10 minutes
-- **Single Use**: Cleared after verification
-- **Rate Limiting**: Built-in via expiry mechanism
-
-## 🌐 API Endpoints
-
-### Authentication Routes (`/api/auth/`)
-| Method | Endpoint | Description | Request Body |
-|--------|----------|-------------|--------------|
-| POST | `/signup` | Create new user account | `{email, firstName, lastName, password}` |
-| POST | `/verify-otp` | Verify email with OTP | `{email, otp}` |
-| POST | `/login` | User authentication | `{email, password}` |
-| POST | `/resend-otp` | Resend verification OTP | `{email}` |
-| POST | `/forgot-password` | Request password reset | `{email}` |
-| POST | `/reset-password` | Reset password with token | `{email, token, newPassword}` |
-| PUT | `/update-user-details` | Update user info | `{email, firstName, lastName, password}` |
-
-### Response Formats
-- **Success**: JSON with data/message
-- **Error**: JSON with error details & HTTP status codes
-- **Authentication**: JWT token in response for login/verification
-
-## 🔧 Environment Configuration
-
-### Required Variables (.env)
+### **Environment Configuration**
 ```env
-# Database
-DATABASE_URL=mysql+pymysql://root:20cs1149@localhost:3306/fuji_sakura_db
+# Database (connects to MySQL for all frontend data)
+DATABASE_URL=mysql+pymysql://user:pass@host:port/database
 
-# JWT Security
-SECRET_KEY=fuji-sakura-super-secret-key-2024
-ALGORITHM=HS256
+# JWT Security (for all frontend authentication)
+SECRET_KEY=your-secret-key
 ACCESS_TOKEN_EXPIRE_DAYS=30
 
-# Mailtrap Email
-MAIL_USERNAME=ac8c79e5058631
-MAIL_PASSWORD=bd9bc02f0a4c0f
-MAIL_FROM=noreply@fujisakura.com
-MAIL_SERVER=sandbox.smtp.mailtrap.io
-MAIL_PORT=2525
-
-# Application
-APP_NAME=Fuji Sakura Food Delivery
-DEBUG=True
+# Email Service (for frontend OTP/notifications)
+MAIL_SERVER=smtp.mailtrap.io
+MAIL_USERNAME=your-username
+MAIL_PASSWORD=your-password
 ```
 
-## 🚀 Deployment & Running
+### **API Documentation**
+- **Swagger UI**: http://localhost:8000/docs (Interactive API testing)
+- **ReDoc**: http://localhost:8000/redoc (Clean API documentation)
+- **Frontend Integration**: All endpoints documented with request/response examples
 
-### Development Setup
-```bash
-# Install dependencies
-pip install -r requirements.txt
+## ✅ Current Status & Frontend Integration
 
-# Run database migration (if needed)
-# Execute database_migration.sql in MySQL Workbench
+### **Fully Integrated Features**
+- ✅ **Customer Authentication**: Complete signup/login flow with frontend
+- ✅ **Admin Portal**: Secure admin login and dashboard
+- ✅ **Restaurant Applications**: Full application and review system
+- ✅ **Email System**: OTP and notification emails working
+- ✅ **Session Management**: JWT tokens with frontend session handling
+- ✅ **Database Operations**: All CRUD operations connected to frontend
 
-# Run development server
-python main.py
-# Server runs on http://localhost:8000
-```
+### **Frontend Pages Connected**
+- ✅ `/login` → `auth.py` APIs
+- ✅ `/admin` → `admin_auth.py` APIs  
+- ✅ `/admin/dashboard` → `restaurant.py` APIs
+- ✅ `/restaurant/apply` → `restaurant.py` APIs
+- ✅ `/forgot-password` → `auth.py` APIs
 
-### API Documentation
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-- **OpenAPI JSON**: http://localhost:8000/openapi.json
-
-## ✅ Current Status
-
-### Completed Features
-- ✅ User registration with email OTP verification
-- ✅ User login with JWT authentication
-- ✅ Password reset functionality
-- ✅ Email integration via Mailtrap
-- ✅ Secure password hashing
-- ✅ Database schema & models
-- ✅ API documentation
-- ✅ Error handling & validation
-- ✅ Frontend integration (signup flow working)
-
-### Tested & Working
-- ✅ Complete signup flow (email → OTP → details → login)
-- ✅ Two-table database structure with automatic token cleanup
-- ✅ OTP generation & email delivery via Mailtrap
-- ✅ Database user creation & verification
-- ✅ Frontend-backend integration
-- ✅ Error handling & user feedback
-- ✅ Automatic token deletion after verification
-- ✅ Clean folder structure without cache files
-
-### Next Steps (Future Development)
-- 🔄 Restaurant management endpoints
-- 🔄 Menu & food item APIs
-- 🔄 Order management system
-- 🔄 Payment integration
-- 🔄 User profile management
-- 🔄 Admin dashboard APIs
-- 🔄 Real-time order tracking
-- 🔄 Push notifications
-
-## 🧪 Testing
-
-### Database Testing
-```sql
--- Check user creation and token management
-SELECT u.email, u.is_verified, ut.otp, ut.otp_expires_at 
-FROM users u 
-LEFT JOIN user_tokens ut ON u.id = ut.user_id 
-ORDER BY u.created_at DESC LIMIT 5;
-
--- Verify automatic token cleanup after verification
-SELECT COUNT(*) as active_tokens FROM user_tokens;
-```
-
-### Manual Testing Flow
-1. **Signup**: Enter email → Check `user_tokens` table for OTP
-2. **Verify**: Enter OTP → Check token is deleted from `user_tokens`
-3. **Complete**: Fill details → User verified, no tokens remaining
+### **Real-time Features Working**
+- ✅ **Live session validation**: Admin dashboard checks every minute
+- ✅ **Automatic token cleanup**: Expired OTPs removed automatically  
+- ✅ **Beautiful notifications**: Replace all alert() with UI notifications
+- ✅ **Timezone handling**: UTC backend with local frontend display
+- ✅ **Admin tracking**: Records which admin approved each application
 
 ---
 
-**Last Updated**: January 21, 2026  
-**Status**: Authentication system complete and working  
-**Next Phase**: Restaurant & menu management APIs
+**Last Updated**: January 28, 2026  
+**Status**: Production-ready backend with complete frontend integration  
+**Next Phase**: Restaurant owner dashboard and menu management system
 
 
-need to update : separte table for otp and mails 
+## 🎯 Latest Updates (January 28, 2026)
 
+### Admin System & Restaurant Applications
+- ✅ **Separate Admin Table**: Created `admins` table isolated from customers
+- ✅ **Admin Authentication**: Separate login system at `/api/admin/login`
+- ✅ **Restaurant Applications**: Complete application system with approval workflow
+- ✅ **Admin Dashboard Security**: Protected `/admin/dashboard` with proper authentication
+- ✅ **Application Status Tracking**: Records which admin approved/rejected applications
+- ✅ **Session Management**: 10-minute auto-logout with warnings and manual logout
+- ✅ **Beautiful Notifications**: Replaced all alert() with professional UI notifications
 
-updated at have to be add in tables and need to add deleted at(optional)
+### New API Endpoints
+- `POST /api/admin/login` - Admin authentication (separate from customers)
+- `POST /api/restaurant/apply` - Restaurant partnership applications
+- `GET /api/restaurant/applications` - View all applications (admin only)
+- `PUT /api/restaurant/applications/{id}/status` - Approve/reject applications
+
+### Database Updates
+- **admins table**: Company employees (manual creation only)
+- **restaurant_applications table**: Partnership requests with full business info
+- **reviewed_by tracking**: Records which admin processed each application
+
+### Security Enhancements
+- Admin accounts created manually with bcrypt hashing
+- Dashboard access requires valid admin authentication
+- Role-based access control (customers vs admins)
+- Application approval tracking for audit purposes
+- Automatic session expiry with user warnings
+
+### Asset Cleanup (January 28, 2026)
+- ✅ **Removed unused files**: auth.ts, utils.ts, README.md, SQL_QUERIES_REFERENCE.md
+- ✅ **Cleaned dependencies**: Removed unused packages (clsx, tailwind-merge, @radix-ui/*)
+- ✅ **Removed Python cache**: Cleaned all __pycache__ folders
+- ✅ **Optimized structure**: Removed empty lib folder

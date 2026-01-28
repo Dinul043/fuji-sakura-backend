@@ -6,7 +6,7 @@ Entry point for the backend server
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.routes import auth
+from app.routes import auth, restaurant, admin_auth
 
 # Create FastAPI application
 app = FastAPI(
@@ -19,7 +19,7 @@ app = FastAPI(
 # Configure CORS for frontend connection
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Next.js frontend
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"],  # Next.js frontend
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,6 +27,12 @@ app.add_middleware(
 
 # Include authentication routes
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+
+# Include admin authentication routes
+app.include_router(admin_auth.router, prefix="/api/admin", tags=["Admin Authentication"])
+
+# Include restaurant routes
+app.include_router(restaurant.router, prefix="/api/restaurant", tags=["Restaurant"])
 
 # Health check endpoint
 @app.get("/")
