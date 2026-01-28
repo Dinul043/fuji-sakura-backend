@@ -69,7 +69,7 @@ async def admin_login(login_data: AdminLogin, db: Session = Depends(get_db)):
 
 @router.get("/verify")
 async def verify_admin_token(authorization: str = Header(None), db: Session = Depends(get_db)):
-    """Verify admin token and check if admin is still active"""
+    """Verify admin token and check if admin is still active in database"""
     try:
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(
@@ -79,19 +79,58 @@ async def verify_admin_token(authorization: str = Header(None), db: Session = De
         
         token = authorization.split(" ")[1]
         
-        # For now, we'll do a simple check
-        # TODO: Implement proper JWT token verification
+        # Import JWT verification here to avoid circular imports
+        from app.utils.security import verify_token
         
-        # Basic validation - token should look like JWT
-        if len(token.split('.')) != 3:
+        # Decode and verify JWT token
+        payload = verify_token(token)
+        if not payload:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token format"
+                detail="Invalid or expired token"
             )
         
-        # For now, return success if token format is valid
-        # In production, you'd decode JWT and check admin status in database
-        return {"status": "valid", "message": "Admin token verified"}
+        # Extract admin info from token
+        admin_email = payload.get("sub")
+        admin_id = payload.get("admin_id")
+        is_admin = payload.get("is_admin")
+        
+        if not admin_email or not admin_id or not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload"
+            )
+        
+        # CRITICAL: Check if admin still exists and is active in database
+        admin = db.query(Admin).filter(
+            Admin.id == admin_id,
+            Admin.email == admin_email
+        ).first()
+        
+        if not admin:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Admin account not found - access revoked"
+            )
+        
+        if not admin.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Admin account deactivated - access revoked"
+            )
+        
+        # Return admin info for frontend
+        return {
+            "status": "valid", 
+            "message": "Admin token verified",
+            "admin": {
+                "id": admin.id,
+                "name": admin.name,
+                "email": admin.email,
+                "is_super_admin": admin.is_super_admin,
+                "is_active": admin.is_active
+            }
+        }
         
     except HTTPException:
         raise

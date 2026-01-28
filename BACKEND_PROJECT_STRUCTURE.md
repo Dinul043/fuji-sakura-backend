@@ -342,3 +342,23 @@ MAIL_PASSWORD=your-password
 - ✅ **Cleaned dependencies**: Removed unused packages (clsx, tailwind-merge, @radix-ui/*)
 - ✅ **Removed Python cache**: Cleaned all __pycache__ folders
 - ✅ **Optimized structure**: Removed empty lib folder
+
+
+
+Add New Admin
+python admin_manager.py add "Admin Name" "email@company.com" "password123"
+
+List All Admins
+python admin_manager.py list
+
+Change Password
+python admin_manager.py change-password "email@company.com" "newpassword123"
+
+Deactivate Admin
+python admin_manager.py deactivate "email@company.com"
+
+Activate Admin
+python admin_manager.py activate "email@company.com"
+
+Delete Admin (Permanent)
+python admin_manager.py delete "email@company.com"
