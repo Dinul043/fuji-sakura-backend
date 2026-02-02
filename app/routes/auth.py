@@ -107,6 +107,33 @@ def clear_user_tokens(db: Session, user_id: int):
     db.query(UserToken).filter(UserToken.user_id == user_id).delete()
     db.commit()
 
+def cleanup_old_unverified_users(db: Session):
+    """
+    Clean up unverified users older than 7 days (optional cleanup)
+    This prevents database bloat from incomplete signups
+    """
+    try:
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=7)
+        old_unverified = db.query(User).filter(
+            User.is_verified == False,
+            User.created_at < cutoff_date.replace(tzinfo=None)
+        ).all()
+        
+        for user in old_unverified:
+            # Delete associated tokens first
+            db.query(UserToken).filter(UserToken.user_id == user.id).delete()
+            # Delete user
+            db.delete(user)
+            logger.info(f"🧹 Cleaned up old unverified user: {user.email}")
+        
+        if old_unverified:
+            db.commit()
+            logger.info(f"🧹 Cleaned up {len(old_unverified)} old unverified users")
+            
+    except Exception as e:
+        logger.error(f"❌ Cleanup error: {str(e)}")
+        db.rollback()
+
 # Authentication routes
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
 def signup(user_data: UserSignup, db: Session = Depends(get_db)):
@@ -123,12 +150,17 @@ def signup(user_data: UserSignup, db: Session = Depends(get_db)):
         
         if existing_user:
             if existing_user.is_verified:
+                # User is fully registered and verified - don't allow duplicate
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail="This email is already registered. Please try with a different email or use Sign In if you have an account."
+                    detail="This email is already registered. Please use Sign In to access your account."
                 )
             else:
-                # User exists but not verified - resend OTP
+                # User exists but not verified (incomplete signup) - allow re-signup
+                # This handles the case where user got OTP but didn't complete verification
+                logger.info(f"🔄 Re-signup attempt for unverified user: {user_data.email}")
+                
+                # Validate new password
                 is_valid, error_msg = validate_password(user_data.password)
                 if not is_valid:
                     raise HTTPException(
@@ -136,29 +168,33 @@ def signup(user_data: UserSignup, db: Session = Depends(get_db)):
                         detail=error_msg
                     )
                 
-                # Update user data and generate new OTP
+                # Update user data with new information (user might want to change name/password)
                 full_name = f"{user_data.firstName} {user_data.lastName}".strip()
                 existing_user.name = full_name
                 existing_user.password = get_password_hash(user_data.password)
+                existing_user.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 
-                # Get or create token record
+                # Generate new OTP (clear any old OTP)
                 token = get_or_create_user_token(db, existing_user.id)
                 token.otp = generate_otp()
                 token.otp_expires_at = get_otp_expiry()
+                # Clear any old reset tokens
+                token.reset_token = None
+                token.reset_token_expires_at = None
                 
                 db.commit()
                 
-                # Send OTP email
+                # Send new OTP email
                 email_sent = send_otp_email(
                     to_email=user_data.email,
                     otp=token.otp,
                     user_name=full_name
                 )
                 
-                logger.info(f"🔐 RESEND OTP for {user_data.email}: {token.otp}")
+                logger.info(f"🔐 NEW OTP for existing unverified user {user_data.email}: {token.otp}")
                 
                 return {
-                    "message": "Account exists but not verified. New OTP sent to your email.",
+                    "message": "New OTP sent! Please verify your email to complete registration.",
                     "email": user_data.email,
                     "requires_verification": True,
                     "email_sent": email_sent

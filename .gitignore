@@ -62,3 +62,9 @@ htmlcov/
 venv/
 env/
 ENV/
+
+# Cache files
+.cache/
+*.cache
+.temp/
+temp/

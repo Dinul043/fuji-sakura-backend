@@ -145,3 +145,379 @@ async def verify_admin_token(authorization: str = Header(None), db: Session = De
 async def admin_logout():
     """Admin logout"""
     return {"message": "Logged out successfully"}
+
+class CreateAdminRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+
+@router.post("/create-admin")
+async def create_admin(
+    admin_data: CreateAdminRequest, 
+    authorization: str = Header(None), 
+    db: Session = Depends(get_db)
+):
+    """Create a new admin account - only accessible by authenticated admins"""
+    try:
+        # Verify admin token
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing or invalid authorization header"
+            )
+        
+        token = authorization.split(" ")[1]
+        
+        # Import JWT verification here to avoid circular imports
+        from app.utils.security import verify_token
+        
+        # Decode and verify JWT token
+        payload = verify_token(token)
+        if not payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token"
+            )
+        
+        # Extract admin info from token
+        admin_email = payload.get("sub")
+        admin_id = payload.get("admin_id")
+        is_admin = payload.get("is_admin")
+        
+        if not admin_email or not admin_id or not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload"
+            )
+        
+        # Check if requesting admin exists and is active
+        requesting_admin = db.query(Admin).filter(
+            Admin.id == admin_id,
+            Admin.email == admin_email,
+            Admin.is_active == True
+        ).first()
+        
+        if not requesting_admin:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Admin account not found or inactive"
+            )
+        
+        # Validate input
+        if not admin_data.name or not admin_data.email or not admin_data.password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Name, email, and password are required"
+            )
+        
+        if len(admin_data.password) < 8:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password must be at least 8 characters long"
+            )
+        
+        # Check if admin with this email already exists
+        existing_admin = db.query(Admin).filter(Admin.email == admin_data.email.lower().strip()).first()
+        if existing_admin:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="An admin with this email already exists"
+            )
+        
+        # Create new admin
+        new_admin = Admin.create(
+            db=db,
+            email=admin_data.email,
+            name=admin_data.name,
+            password=admin_data.password,
+            is_super_admin=False,  # New admins are not super admins by default
+            created_by=requesting_admin.id
+        )
+        
+        return {
+            "message": "Admin created successfully",
+            "admin": {
+                "id": new_admin.id,
+                "name": new_admin.name,
+                "email": new_admin.email,
+                "is_active": new_admin.is_active,
+                "created_at": new_admin.created_at.isoformat() if new_admin.created_at else None
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Create admin error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create admin. Please try again."
+        )
+
+@router.get("/list-admins")
+async def list_admins(
+    authorization: str = Header(None), 
+    db: Session = Depends(get_db)
+):
+    """List all admins - only accessible by authenticated admins"""
+    try:
+        # Verify admin token
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing or invalid authorization header"
+            )
+        
+        token = authorization.split(" ")[1]
+        
+        # Import JWT verification here to avoid circular imports
+        from app.utils.security import verify_token
+        
+        # Decode and verify JWT token
+        payload = verify_token(token)
+        if not payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token"
+            )
+        
+        # Extract admin info from token
+        admin_email = payload.get("sub")
+        admin_id = payload.get("admin_id")
+        is_admin = payload.get("is_admin")
+        
+        if not admin_email or not admin_id or not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload"
+            )
+        
+        # Check if requesting admin exists and is active
+        requesting_admin = db.query(Admin).filter(
+            Admin.id == admin_id,
+            Admin.email == admin_email,
+            Admin.is_active == True
+        ).first()
+        
+        if not requesting_admin:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Admin account not found or inactive"
+            )
+        
+        # Get all admins (including inactive ones for super admin view)
+        all_admins = db.query(Admin).order_by(Admin.created_at.desc()).all()
+        
+        admin_list = []
+        for admin in all_admins:
+            admin_dict = admin.to_dict()
+            # Add creator name if available
+            if admin.created_by:
+                creator = db.query(Admin).filter(Admin.id == admin.created_by).first()
+                admin_dict['created_by_name'] = creator.name if creator else 'Unknown'
+            else:
+                admin_dict['created_by_name'] = 'System'
+            admin_list.append(admin_dict)
+        
+        return {
+            "admins": admin_list,
+            "total_count": len(admin_list),
+            "active_count": len([a for a in admin_list if a['is_active']]),
+            "requesting_admin": {
+                "id": requesting_admin.id,
+                "is_super_admin": requesting_admin.is_super_admin
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"List admins error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch admin list. Please try again."
+        )
+
+@router.put("/deactivate-admin/{admin_id}")
+async def deactivate_admin(
+    admin_id: int,
+    authorization: str = Header(None), 
+    db: Session = Depends(get_db)
+):
+    """Deactivate an admin account - only accessible by super admins"""
+    try:
+        # Verify admin token
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing or invalid authorization header"
+            )
+        
+        token = authorization.split(" ")[1]
+        
+        # Import JWT verification here to avoid circular imports
+        from app.utils.security import verify_token
+        
+        # Decode and verify JWT token
+        payload = verify_token(token)
+        if not payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token"
+            )
+        
+        # Extract admin info from token
+        admin_email = payload.get("sub")
+        requesting_admin_id = payload.get("admin_id")
+        is_admin = payload.get("is_admin")
+        
+        if not admin_email or not requesting_admin_id or not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload"
+            )
+        
+        # Check if requesting admin exists, is active, and is super admin
+        requesting_admin = db.query(Admin).filter(
+            Admin.id == requesting_admin_id,
+            Admin.email == admin_email,
+            Admin.is_active == True,
+            Admin.is_super_admin == True
+        ).first()
+        
+        if not requesting_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only super admins can deactivate other admins"
+            )
+        
+        # Prevent self-deactivation
+        if admin_id == requesting_admin_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You cannot deactivate your own account"
+            )
+        
+        # Find the admin to deactivate
+        target_admin = db.query(Admin).filter(Admin.id == admin_id).first()
+        if not target_admin:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Admin not found"
+            )
+        
+        if not target_admin.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Admin is already deactivated"
+            )
+        
+        # Deactivate the admin
+        target_admin.deactivate(db)
+        
+        return {
+            "message": f"Admin '{target_admin.name}' has been deactivated successfully",
+            "deactivated_admin": {
+                "id": target_admin.id,
+                "name": target_admin.name,
+                "email": target_admin.email,
+                "is_active": target_admin.is_active
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Deactivate admin error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to deactivate admin. Please try again."
+        )
+
+@router.put("/reactivate-admin/{admin_id}")
+async def reactivate_admin(
+    admin_id: int,
+    authorization: str = Header(None), 
+    db: Session = Depends(get_db)
+):
+    """Reactivate an admin account - only accessible by super admins"""
+    try:
+        # Verify admin token (same verification as deactivate)
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing or invalid authorization header"
+            )
+        
+        token = authorization.split(" ")[1]
+        
+        from app.utils.security import verify_token
+        
+        payload = verify_token(token)
+        if not payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token"
+            )
+        
+        admin_email = payload.get("sub")
+        requesting_admin_id = payload.get("admin_id")
+        is_admin = payload.get("is_admin")
+        
+        if not admin_email or not requesting_admin_id or not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload"
+            )
+        
+        # Check if requesting admin is super admin
+        requesting_admin = db.query(Admin).filter(
+            Admin.id == requesting_admin_id,
+            Admin.email == admin_email,
+            Admin.is_active == True,
+            Admin.is_super_admin == True
+        ).first()
+        
+        if not requesting_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only super admins can reactivate other admins"
+            )
+        
+        # Find the admin to reactivate
+        target_admin = db.query(Admin).filter(Admin.id == admin_id).first()
+        if not target_admin:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Admin not found"
+            )
+        
+        if target_admin.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Admin is already active"
+            )
+        
+        # Reactivate the admin
+        target_admin.is_active = True
+        target_admin.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        db.commit()
+        
+        return {
+            "message": f"Admin '{target_admin.name}' has been reactivated successfully",
+            "reactivated_admin": {
+                "id": target_admin.id,
+                "name": target_admin.name,
+                "email": target_admin.email,
+                "is_active": target_admin.is_active
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Reactivate admin error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to reactivate admin. Please try again."
+        )

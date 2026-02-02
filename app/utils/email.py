@@ -228,3 +228,276 @@ def send_password_reset_email(to_email: str, reset_token: str, user_name: str = 
     except Exception as e:
         logger.error(f"❌ Failed to send reset email to {to_email}: {str(e)}")
         return False
+
+def send_restaurant_approval_email(email: str, restaurant_name: str, owner_name: str):
+    """Send approval email to restaurant owner"""
+    try:
+        # Create message
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = f"🎉 Restaurant Application Approved - {restaurant_name}"
+        msg['From'] = f"Fuji Sakura <{settings.MAIL_FROM}>"
+        msg['To'] = email
+        
+        # HTML content with Fuji Sakura branding
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <style>
+                body {{ font-family: 'Arial', sans-serif; margin: 0; padding: 0; background-color: #f5f5f5; }}
+                .container {{ max-width: 600px; margin: 0 auto; background-color: white; }}
+                .header {{ background: linear-gradient(135deg, #FF5722 0%, #FF7043 100%); padding: 30px; text-align: center; }}
+                .header h1 {{ color: white; margin: 0; font-size: 28px; font-weight: bold; }}
+                .content {{ padding: 40px 30px; }}
+                .success-icon {{ font-size: 60px; text-align: center; margin-bottom: 20px; }}
+                .button {{ display: inline-block; background: linear-gradient(135deg, #FF5722 0%, #FF7043 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; margin: 20px 0; }}
+                .footer {{ background-color: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }}
+                .highlight {{ background-color: #fff3e0; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #FF5722; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🌸 Fuji Sakura Food Delivery</h1>
+                    <p style="color: white; margin: 10px 0 0 0; font-size: 16px;">Restaurant Partnership Program</p>
+                </div>
+                
+                <div class="content">
+                    <div class="success-icon">🎉</div>
+                    
+                    <h2 style="color: #FF5722; text-align: center; margin-bottom: 30px;">
+                        Congratulations! Your Application is Approved
+                    </h2>
+                    
+                    <p style="font-size: 16px; line-height: 1.6; color: #333;">
+                        Dear {owner_name},
+                    </p>
+                    
+                    <p style="font-size: 16px; line-height: 1.6; color: #333;">
+                        We are excited to inform you that your restaurant partnership application for <strong>{restaurant_name}</strong> has been approved! 🎊
+                    </p>
+                    
+                    <div class="highlight">
+                        <h3 style="color: #FF5722; margin-top: 0;">What's Next?</h3>
+                        <ul style="color: #333; line-height: 1.8;">
+                            <li>📋 <strong>Restaurant Dashboard Access:</strong> Coming soon - you'll receive login credentials</li>
+                            <li>🍽️ <strong>Menu Setup:</strong> Add your delicious dishes and set pricing</li>
+                            <li>📱 <strong>Order Management:</strong> Start receiving and managing customer orders</li>
+                            <li>📊 <strong>Analytics:</strong> Track your restaurant's performance</li>
+                        </ul>
+                    </div>
+                    
+                    <p style="font-size: 16px; line-height: 1.6; color: #333;">
+                        Our team will contact you within 24-48 hours with detailed onboarding instructions and your restaurant dashboard access.
+                    </p>
+                    
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="http://localhost:3001/restaurant/apply" class="button">
+                            Check Application Status
+                        </a>
+                    </div>
+                    
+                    <p style="font-size: 16px; line-height: 1.6; color: #333;">
+                        Welcome to the Fuji Sakura family! We look forward to a successful partnership.
+                    </p>
+                    
+                    <p style="font-size: 16px; line-height: 1.6; color: #333;">
+                        Best regards,<br>
+                        <strong>Fuji Sakura Partnership Team</strong><br>
+                        📧 support@fujisakura.com<br>
+                        📞 +1 (555) 123-4567
+                    </p>
+                </div>
+                
+                <div class="footer">
+                    <p>© 2026 Fuji Sakura Food Delivery. All rights reserved.</p>
+                    <p>This is an automated message. Please do not reply to this email.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        # Plain text fallback
+        text_content = f"""
+        Congratulations! Your Restaurant Application is Approved
+        
+        Dear {owner_name},
+        
+        We are excited to inform you that your restaurant partnership application for {restaurant_name} has been approved!
+        
+        What's Next?
+        - Restaurant Dashboard Access: Coming soon - you'll receive login credentials
+        - Menu Setup: Add your delicious dishes and set pricing
+        - Order Management: Start receiving and managing customer orders
+        - Analytics: Track your restaurant's performance
+        
+        Our team will contact you within 24-48 hours with detailed onboarding instructions.
+        
+        Welcome to the Fuji Sakura family!
+        
+        Best regards,
+        Fuji Sakura Partnership Team
+        support@fujisakura.com
+        """
+        
+        # Attach both versions
+        part1 = MIMEText(text_content, 'plain')
+        part2 = MIMEText(html_content, 'html')
+        msg.attach(part1)
+        msg.attach(part2)
+        
+        # Send email
+        with smtplib.SMTP(settings.MAIL_SERVER, settings.MAIL_PORT) as server:
+            server.starttls()
+            server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
+            server.send_message(msg)
+        
+        logger.info(f"✅ Restaurant approval email sent to {email}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to send restaurant approval email to {email}: {e}")
+        return False
+
+def send_restaurant_rejection_email(email: str, restaurant_name: str, owner_name: str, rejection_reason: str = ""):
+    """Send rejection email to restaurant owner"""
+    try:
+        # Create message
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = f"Restaurant Application Update - {restaurant_name}"
+        msg['From'] = f"Fuji Sakura <{settings.MAIL_FROM}>"
+        msg['To'] = email
+        
+        # HTML content with Fuji Sakura branding
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <style>
+                body {{ font-family: 'Arial', sans-serif; margin: 0; padding: 0; background-color: #f5f5f5; }}
+                .container {{ max-width: 600px; margin: 0 auto; background-color: white; }}
+                .header {{ background: linear-gradient(135deg, #FF5722 0%, #FF7043 100%); padding: 30px; text-align: center; }}
+                .header h1 {{ color: white; margin: 0; font-size: 28px; font-weight: bold; }}
+                .content {{ padding: 40px 30px; }}
+                .info-icon {{ font-size: 60px; text-align: center; margin-bottom: 20px; }}
+                .button {{ display: inline-block; background: linear-gradient(135deg, #FF5722 0%, #FF7043 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; margin: 20px 0; }}
+                .footer {{ background-color: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; }}
+                .highlight {{ background-color: #fff3e0; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #FF5722; }}
+                .reason-box {{ background-color: #fafafa; padding: 20px; border-radius: 8px; margin: 20px 0; border: 1px solid #e0e0e0; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🌸 Fuji Sakura Food Delivery</h1>
+                    <p style="color: white; margin: 10px 0 0 0; font-size: 16px;">Restaurant Partnership Program</p>
+                </div>
+                
+                <div class="content">
+                    <div class="info-icon">📋</div>
+                    
+                    <h2 style="color: #FF5722; text-align: center; margin-bottom: 30px;">
+                        Application Status Update
+                    </h2>
+                    
+                    <p style="font-size: 16px; line-height: 1.6; color: #333;">
+                        Dear {owner_name},
+                    </p>
+                    
+                    <p style="font-size: 16px; line-height: 1.6; color: #333;">
+                        Thank you for your interest in partnering with Fuji Sakura Food Delivery for <strong>{restaurant_name}</strong>.
+                    </p>
+                    
+                    <p style="font-size: 16px; line-height: 1.6; color: #333;">
+                        After careful review, we are unable to approve your application at this time.
+                    </p>
+                    
+                    {f'''
+                    <div class="reason-box">
+                        <h3 style="color: #FF5722; margin-top: 0;">Review Notes:</h3>
+                        <p style="color: #333; line-height: 1.6; margin: 0;">{rejection_reason}</p>
+                    </div>
+                    ''' if rejection_reason else ''}
+                    
+                    <div class="highlight">
+                        <h3 style="color: #FF5722; margin-top: 0;">What You Can Do:</h3>
+                        <ul style="color: #333; line-height: 1.8;">
+                            <li>📝 <strong>Review Requirements:</strong> Check our partnership requirements</li>
+                            <li>🔄 <strong>Reapply:</strong> You can submit a new application after addressing any concerns</li>
+                            <li>📞 <strong>Contact Us:</strong> Reach out for clarification on requirements</li>
+                            <li>💬 <strong>Get Support:</strong> Our team is here to help you succeed</li>
+                        </ul>
+                    </div>
+                    
+                    <p style="font-size: 16px; line-height: 1.6; color: #333;">
+                        We appreciate your interest in joining our platform and encourage you to reapply once you've addressed any requirements.
+                    </p>
+                    
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="http://localhost:3001/restaurant/apply" class="button">
+                            Submit New Application
+                        </a>
+                    </div>
+                    
+                    <p style="font-size: 16px; line-height: 1.6; color: #333;">
+                        Best regards,<br>
+                        <strong>Fuji Sakura Partnership Team</strong><br>
+                        📧 support@fujisakura.com<br>
+                        📞 +1 (555) 123-4567
+                    </p>
+                </div>
+                
+                <div class="footer">
+                    <p>© 2026 Fuji Sakura Food Delivery. All rights reserved.</p>
+                    <p>This is an automated message. Please do not reply to this email.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        # Plain text fallback
+        text_content = f"""
+        Restaurant Application Update
+        
+        Dear {owner_name},
+        
+        Thank you for your interest in partnering with Fuji Sakura Food Delivery for {restaurant_name}.
+        
+        After careful review, we are unable to approve your application at this time.
+        
+        {f'Review Notes: {rejection_reason}' if rejection_reason else ''}
+        
+        What You Can Do:
+        - Review Requirements: Check our partnership requirements
+        - Reapply: You can submit a new application after addressing any concerns
+        - Contact Us: Reach out for clarification on requirements
+        
+        We appreciate your interest and encourage you to reapply once requirements are met.
+        
+        Best regards,
+        Fuji Sakura Partnership Team
+        support@fujisakura.com
+        """
+        
+        # Attach both versions
+        part1 = MIMEText(text_content, 'plain')
+        part2 = MIMEText(html_content, 'html')
+        msg.attach(part1)
+        msg.attach(part2)
+        
+        # Send email
+        with smtplib.SMTP(settings.MAIL_SERVER, settings.MAIL_PORT) as server:
+            server.starttls()
+            server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
+            server.send_message(msg)
+        
+        logger.info(f"✅ Restaurant rejection email sent to {email}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to send restaurant rejection email to {email}: {e}")
+        return False
