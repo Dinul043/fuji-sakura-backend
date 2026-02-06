@@ -161,7 +161,7 @@ def signup(user_data: UserSignup, db: Session = Depends(get_db)):
                 logger.info(f"🔄 Re-signup attempt for unverified user: {user_data.email}")
                 
                 # Validate new password
-                is_valid, error_msg = validate_password(user_data.password)
+                is_valid, error_msg = validate_password(user_data.password.strip())
                 if not is_valid:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -171,7 +171,7 @@ def signup(user_data: UserSignup, db: Session = Depends(get_db)):
                 # Update user data with new information (user might want to change name/password)
                 full_name = f"{user_data.firstName} {user_data.lastName}".strip()
                 existing_user.name = full_name
-                existing_user.password = get_password_hash(user_data.password)
+                existing_user.password = get_password_hash(user_data.password.strip())
                 existing_user.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 
                 # Generate new OTP (clear any old OTP)
@@ -201,7 +201,7 @@ def signup(user_data: UserSignup, db: Session = Depends(get_db)):
                 }
         
         # Validate password
-        is_valid, error_msg = validate_password(user_data.password)
+        is_valid, error_msg = validate_password(user_data.password.strip())
         if not is_valid:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -210,7 +210,7 @@ def signup(user_data: UserSignup, db: Session = Depends(get_db)):
         
         # Create new user
         full_name = f"{user_data.firstName} {user_data.lastName}".strip()
-        hashed_password = get_password_hash(user_data.password)
+        hashed_password = get_password_hash(user_data.password.strip())
         otp = generate_otp()
         
         new_user = User(
@@ -384,7 +384,7 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
             )
         
         # Verify password
-        if not verify_password(login_data.password, user.password):
+        if not verify_password(login_data.password.strip(), user.password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect email or password"
@@ -623,7 +623,7 @@ def reset_password(reset_data: ResetPassword, db: Session = Depends(get_db)):
             )
         
         # Validate new password
-        is_valid, error_msg = validate_password(reset_data.newPassword)
+        is_valid, error_msg = validate_password(reset_data.newPassword.strip())
         if not is_valid:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -631,14 +631,14 @@ def reset_password(reset_data: ResetPassword, db: Session = Depends(get_db)):
             )
         
         # Check if new password is same as current password
-        if verify_password(reset_data.newPassword, user.password):
+        if verify_password(reset_data.newPassword.strip(), user.password):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="New password cannot be the same as your current password. Please choose a different password."
             )
         
         # Update password and clear reset tokens
-        user.password = get_password_hash(reset_data.newPassword)
+        user.password = get_password_hash(reset_data.newPassword.strip())
         user.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
         
         # Clear all tokens for this user
@@ -681,7 +681,7 @@ def update_user_details(user_data: UpdateUserDetails, db: Session = Depends(get_
             )
         
         # Validate password
-        is_valid, error_msg = validate_password(user_data.password)
+        is_valid, error_msg = validate_password(user_data.password.strip())
         if not is_valid:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -691,7 +691,7 @@ def update_user_details(user_data: UpdateUserDetails, db: Session = Depends(get_
         # Update user details
         full_name = f"{user_data.firstName} {user_data.lastName}".strip()
         user.name = full_name
-        user.password = get_password_hash(user_data.password)
+        user.password = get_password_hash(user_data.password.strip())
         user.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
         
         db.commit()

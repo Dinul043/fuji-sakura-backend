@@ -44,3 +44,5 @@ def create_tables():
     Call this to initialize the database
     """
     Base.metadata.create_all(bind=engine)
+
+

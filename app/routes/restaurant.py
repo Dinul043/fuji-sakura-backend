@@ -1,12 +1,18 @@
-from fastapi import APIRouter, HTTPException, status, Depends, Header
+from fastapi import APIRouter, HTTPException, status, Depends, Header, UploadFile, File
 from pydantic import BaseModel, EmailStr, validator
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
+from sqlalchemy import text, func
+from pathlib import Path
+import uuid
+import os
 from app.core.database import get_db
 from app.utils.email import send_restaurant_approval_email, send_restaurant_rejection_email
 from app.models.restaurant_application import RestaurantApplication, ApplicationStatus
+from app.models.restaurant_menu import RestaurantMenu
 from app.utils.security import verify_password, get_password_hash, create_access_token
+from app.utils.file_cleanup import delete_old_image, cleanup_restaurant_images
 
 router = APIRouter()
 
@@ -67,15 +73,26 @@ class RestaurantLoginResponse(BaseModel):
 async def submit_restaurant_application(application_data: RestaurantApplicationRequest, db: Session = Depends(get_db)):
     """Submit a new restaurant application"""
     try:
-        # Check if email already has a pending application
+        # STRONG VALIDATION: Check if email already has ANY application (pending, approved, or rejected)
         existing_email_application = RestaurantApplication.get_by_email(db, application_data.email)
-        if existing_email_application and existing_email_application.status == ApplicationStatus.PENDING:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="An application with this email is already pending review. Please wait for the current application to be processed."
-            )
+        if existing_email_application:
+            if existing_email_application.status == ApplicationStatus.PENDING:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="An application with this email is already pending review. Please wait for the current application to be processed."
+                )
+            elif existing_email_application.status == ApplicationStatus.APPROVED:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="This email is already registered with an approved restaurant. Please use the login page to access your account."
+                )
+            elif existing_email_application.status == ApplicationStatus.REJECTED:
+                # For rejected applications, allow reapplication but delete the old rejected record first
+                print(f"🔄 Removing old rejected application for {application_data.email} to allow reapplication")
+                db.delete(existing_email_application)
+                db.commit()
         
-        # Check if phone number is already used
+        # Check if phone number is already used (across ALL applications, not just pending)
         existing_phone_application = RestaurantApplication.get_by_phone(db, application_data.phone)
         if existing_phone_application:
             raise HTTPException(
@@ -83,7 +100,7 @@ async def submit_restaurant_application(application_data: RestaurantApplicationR
                 detail="This phone number is already registered with another restaurant application. Each restaurant must have a unique phone number."
             )
         
-        # Check if business license is already used
+        # Check if business license is already used (across ALL applications)
         existing_license_application = RestaurantApplication.get_by_business_license(db, application_data.businessLicense)
         if existing_license_application:
             raise HTTPException(
@@ -91,7 +108,7 @@ async def submit_restaurant_application(application_data: RestaurantApplicationR
                 detail="This business license number is already registered with another restaurant. Each restaurant must have a unique business license."
             )
         
-        # Check if food permit is already used
+        # Check if food permit is already used (across ALL applications)
         existing_permit_application = RestaurantApplication.get_by_food_permit(db, application_data.foodPermit)
         if existing_permit_application:
             raise HTTPException(
@@ -299,6 +316,8 @@ async def get_restaurant_profile(authorization: str = Header(None), db: Session 
             "description": restaurant_app.description,
             "business_license": restaurant_app.business_license,
             "food_permit": restaurant_app.food_permit,
+            "restaurant_image": restaurant_app.restaurant_image,  # Add restaurant image field
+            "is_online": restaurant_app.is_online,  # Add online status
             "status": "approved",
             "created_at": restaurant_app.created_at.isoformat() if restaurant_app.created_at else None,
             "approved_at": restaurant_app.reviewed_at.isoformat() if restaurant_app.reviewed_at else None
@@ -441,6 +460,49 @@ async def restaurant_logout(authorization: str = Header(None), db: Session = Dep
             detail="Logout failed"
         )
 
+@router.get("/debug/session-status")
+async def debug_session_status(authorization: str = Header(None), db: Session = Depends(get_db)):
+    """Debug endpoint to check session status"""
+    try:
+        if not authorization or not authorization.startswith("Bearer "):
+            return {"error": "No authorization header"}
+        
+        token = authorization.split(" ")[1]
+        
+        from app.utils.security import verify_token
+        
+        payload = verify_token(token)
+        if not payload:
+            return {"error": "Invalid token"}
+        
+        restaurant_email = payload.get("sub")
+        if not restaurant_email:
+            return {"error": "No email in token"}
+        
+        # Get restaurant application
+        restaurant_app = db.query(RestaurantApplication).filter(
+            RestaurantApplication.email == restaurant_email,
+            RestaurantApplication.status == ApplicationStatus.APPROVED
+        ).first()
+        
+        if not restaurant_app:
+            return {"error": "Restaurant not found"}
+        
+        current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        
+        return {
+            "restaurant_email": restaurant_email,
+            "has_active_session_token": bool(restaurant_app.active_session_token),
+            "session_expires_at": restaurant_app.session_expires_at.isoformat() if restaurant_app.session_expires_at else None,
+            "current_time": current_time.isoformat(),
+            "session_expired": restaurant_app.session_expires_at <= current_time if restaurant_app.session_expires_at else True,
+            "has_active_session": restaurant_app.has_active_session(),
+            "is_session_active": restaurant_app.is_session_active(token)
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
 @router.post("/login", response_model=RestaurantLoginResponse)
 async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Depends(get_db)):
     """Restaurant login endpoint"""
@@ -479,11 +541,36 @@ async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Dep
             )
         
         # Check if restaurant already has an active session
+        # First, clear any expired sessions
+        application.force_clear_expired_sessions(db)
+        
+        # Also clear any sessions that are older than 8 hours (safety cleanup)
+        current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        cleanup_time = current_time - timedelta(hours=8)
+        
+        # Clear old sessions for all restaurants (cleanup)
+        db.execute(text("""
+            UPDATE restaurant_applications 
+            SET active_session_token = NULL, session_expires_at = NULL 
+            WHERE session_expires_at < :cleanup_time OR (session_expires_at IS NULL AND active_session_token IS NOT NULL)
+        """), {"cleanup_time": cleanup_time})
+        db.commit()
+        
+        # Refresh the application object after cleanup
+        db.refresh(application)
+        
+        # DEVELOPMENT FIX: For better UX, automatically clear existing session for this user
+        # This prevents the "already logged in" error when users navigate away without logout
         if application.has_active_session():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Restaurant account is already logged in elsewhere. Please logout from the other device first or wait for the session to expire."
-            )
+            print(f"🔄 Force clearing existing session for {application.email} to allow re-login")
+            application.clear_session(db)
+            
+        # Note: In production, you might want to keep the session conflict check:
+        # if application.has_active_session():
+        #     raise HTTPException(
+        #         status_code=status.HTTP_409_CONFLICT,
+        #         detail="Restaurant account is already logged in elsewhere. Please logout from the other device first or wait for the session to expire."
+        #     )
         
         # Create access token with 8-hour expiry
         expires_delta = timedelta(hours=8)
@@ -519,6 +606,7 @@ async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Dep
         raise
     except Exception as e:
         print(f"Restaurant login error: {e}")
+        print(f"Login attempt for email: {login_data.email}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Login failed. Please try again."
@@ -556,20 +644,493 @@ async def check_license_availability(license_number: str, db: Session = Depends(
             detail="Failed to check license availability"
         )
 
-@router.get("/check-permit/{permit_number}")
-async def check_permit_availability(permit_number: str, db: Session = Depends(get_db)):
-    """Check if food permit number is already used"""
+@router.get("/public/restaurants")
+async def get_public_restaurants(db: Session = Depends(get_db)):
+    """Get all approved restaurants with images for customer-facing pages"""
     try:
-        existing_application = RestaurantApplication.get_by_food_permit(db, permit_number)
+        # Get all approved restaurants that have uploaded restaurant images
+        approved_restaurants = db.query(RestaurantApplication).filter(
+            RestaurantApplication.status == ApplicationStatus.APPROVED,
+            RestaurantApplication.restaurant_image.isnot(None),
+            RestaurantApplication.restaurant_image != ""
+        ).all()
+        
+        restaurants_data = []
+        for restaurant in approved_restaurants:
+            # Get menu items count for this restaurant
+            menu_count = db.query(RestaurantMenu).filter(
+                RestaurantMenu.restaurant_id == restaurant.id,
+                RestaurantMenu.is_available == True
+            ).count()
+            
+            # Calculate average price from menu items
+            avg_price_result = db.query(func.avg(RestaurantMenu.price)).filter(
+                RestaurantMenu.restaurant_id == restaurant.id,
+                RestaurantMenu.is_available == True
+            ).scalar()
+            avg_price = round(avg_price_result, 2) if avg_price_result else 0
+            
+            restaurant_data = {
+                "id": restaurant.id,
+                "name": restaurant.business_name,
+                "owner_name": restaurant.owner_name,
+                "cuisine": restaurant.cuisine_type,
+                "description": restaurant.description,
+                "address": restaurant.address,
+                "phone": restaurant.phone,
+                "email": restaurant.email,
+                "restaurant_image": restaurant.restaurant_image,  # Include restaurant image
+                "is_online": restaurant.is_online,  # Restaurant online/offline status
+                "menu_items_count": menu_count,
+                "average_price": avg_price,
+                "created_at": restaurant.created_at.isoformat() if restaurant.created_at else None,
+                # Mock data for now - can be enhanced later
+                "rating": round(4.0 + (restaurant.id % 10) * 0.1, 1),  # 4.0-4.9 rating
+                "delivery_time": f"{20 + (restaurant.id % 20)}-{30 + (restaurant.id % 20)} min",
+                "delivery_fee": round(2.0 + (restaurant.id % 5) * 0.5, 1),  # $2.0-$4.5
+                "reviews": 50 + (restaurant.id % 200),  # 50-250 reviews
+                "image": "🍽️",  # Default emoji, can be enhanced with real images
+                "tags": [restaurant.cuisine_type, "Popular", "Fast Delivery"],
+                "category": restaurant.cuisine_type
+            }
+            restaurants_data.append(restaurant_data)
+        
         return {
-            "available": existing_application is None,
-            "message": "Food permit is available" if existing_application is None else "This food permit number is already registered with another restaurant"
+            "restaurants": restaurants_data,
+            "total_count": len(restaurants_data)
         }
+        
     except Exception as e:
-        print(f"Permit check error: {e}")
+        print(f"Get public restaurants error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to check permit availability"
+            detail="Failed to fetch restaurants"
+        )
+
+@router.get("/public/restaurants/{restaurant_id}")
+async def get_public_restaurant_details(restaurant_id: int, db: Session = Depends(get_db)):
+    """Get specific restaurant details with menu for customer-facing pages"""
+    try:
+        # Get restaurant details
+        restaurant = db.query(RestaurantApplication).filter(
+            RestaurantApplication.id == restaurant_id,
+            RestaurantApplication.status == ApplicationStatus.APPROVED
+        ).first()
+        
+        if not restaurant:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Restaurant not found or not available"
+            )
+        
+        # Get restaurant's menu items (show ALL items, including unavailable ones)
+        menu_items = db.query(RestaurantMenu).filter(
+            RestaurantMenu.restaurant_id == restaurant_id
+        ).order_by(RestaurantMenu.category, RestaurantMenu.item_name).all()
+        
+        # Group menu items by category
+        menu_by_category = {}
+        for item in menu_items:
+            if item.category not in menu_by_category:
+                menu_by_category[item.category] = []
+            menu_by_category[item.category].append({
+                "id": item.id,
+                "name": item.item_name,
+                "description": item.description,
+                "price": item.price,
+                "image_url": item.image_url,
+                "category": item.category,
+                "is_available": item.is_available  # Add availability status
+            })
+        
+        # Calculate restaurant stats
+        total_items = len(menu_items)
+        avg_price = round(sum(item.price for item in menu_items) / total_items, 2) if total_items > 0 else 0
+        
+        restaurant_details = {
+            "id": restaurant.id,
+            "name": restaurant.business_name,
+            "owner_name": restaurant.owner_name,
+            "cuisine": restaurant.cuisine_type,
+            "description": restaurant.description,
+            "address": restaurant.address,
+            "phone": restaurant.phone,
+            "menu_by_category": menu_by_category,
+            "total_menu_items": total_items,
+            "average_price": avg_price,
+            # Mock data for now
+            "rating": round(4.0 + (restaurant.id % 10) * 0.1, 1),
+            "delivery_time": f"{20 + (restaurant.id % 20)}-{30 + (restaurant.id % 20)} min",
+            "delivery_fee": round(2.0 + (restaurant.id % 5) * 0.5, 1),
+            "reviews": 50 + (restaurant.id % 200),
+            "image": "🍽️",
+            "tags": [restaurant.cuisine_type, "Popular", "Fast Delivery"],
+            "hours": "9:00 AM - 11:00 PM",
+            "is_open": True
+        }
+        
+        return restaurant_details
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Get restaurant details error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch restaurant details"
+        )
+
+@router.get("/public/categories")
+async def get_restaurant_categories(db: Session = Depends(get_db)):
+    """Get all available restaurant categories for customer-facing pages"""
+    try:
+        # Get unique cuisine types from approved restaurants
+        categories_result = db.query(RestaurantApplication.cuisine_type).filter(
+            RestaurantApplication.status == ApplicationStatus.APPROVED
+        ).distinct().all()
+        
+        categories = []
+        category_emojis = {
+            "Indian": "🍛",
+            "Chinese": "🥢", 
+            "Italian": "🍝",
+            "Japanese": "🍣",
+            "Thai": "🍜",
+            "Mexican": "🌮",
+            "American": "🍔",
+            "Mediterranean": "🥙",
+            "Korean": "🍲",
+            "Vietnamese": "🍲"
+        }
+        
+        for category_tuple in categories_result:
+            cuisine_type = category_tuple[0]
+            categories.append({
+                "id": cuisine_type.lower().replace(" ", "_"),
+                "name": cuisine_type,
+                "emoji": category_emojis.get(cuisine_type, "🍽️")
+            })
+        
+        return {
+            "categories": categories
+        }
+        
+    except Exception as e:
+        print(f"Get categories error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch categories"
+        )
+
+@router.post("/admin/clear-sessions")
+async def admin_clear_all_sessions(db: Session = Depends(get_db)):
+    """Admin endpoint to clear all active sessions (for debugging)"""
+    try:
+        # Clear all active sessions
+        result = db.execute(text("UPDATE restaurant_applications SET active_session_token = NULL, session_expires_at = NULL WHERE active_session_token IS NOT NULL"))
+        db.commit()
+        
+        return {
+            "message": f"Cleared {result.rowcount} active sessions",
+            "cleared_count": result.rowcount
+        }
+    except Exception as e:
+        print(f"Clear sessions error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to clear sessions"
+        )
+
+@router.get("/admin/session-status")
+async def get_session_status(db: Session = Depends(get_db)):
+    """Admin endpoint to check current session status"""
+    try:
+        # Get all active sessions
+        result = db.execute(text("SELECT email, business_name, active_session_token IS NOT NULL as has_token, session_expires_at FROM restaurant_applications WHERE status = 1"))
+        sessions = result.fetchall()
+        
+        return {
+            "total_approved_restaurants": len(sessions),
+            "restaurants": [
+                {
+                    "email": session[0],
+                    "business_name": session[1],
+                    "has_active_session": bool(session[2]),
+                    "session_expires_at": session[3].isoformat() if session[3] else None
+                }
+                for session in sessions
+            ]
+        }
+    except Exception as e:
+        print(f"Session status error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get session status"
+        )
+
+@router.get("/admin/integrity-check")
+async def check_database_integrity(db: Session = Depends(get_db)):
+    """Admin endpoint to check for duplicate records and data integrity"""
+    try:
+        integrity_report = {
+            "duplicate_emails": [],
+            "duplicate_phones": [],
+            "duplicate_licenses": [],
+            "duplicate_permits": [],
+            "total_applications": 0,
+            "status_breakdown": {"pending": 0, "approved": 0, "rejected": 0}
+        }
+        
+        # Check for duplicate emails
+        result = db.execute(text("""
+            SELECT email, COUNT(*) as count, GROUP_CONCAT(id) as ids
+            FROM restaurant_applications 
+            GROUP BY email 
+            HAVING COUNT(*) > 1
+        """))
+        email_dupes = result.fetchall()
+        integrity_report["duplicate_emails"] = [
+            {"email": dupe[0], "count": dupe[1], "ids": dupe[2]}
+            for dupe in email_dupes
+        ]
+        
+        # Check for duplicate phones
+        result = db.execute(text("""
+            SELECT phone, COUNT(*) as count, GROUP_CONCAT(email) as emails
+            FROM restaurant_applications 
+            GROUP BY phone 
+            HAVING COUNT(*) > 1
+        """))
+        phone_dupes = result.fetchall()
+        integrity_report["duplicate_phones"] = [
+            {"phone": dupe[0], "count": dupe[1], "emails": dupe[2]}
+            for dupe in phone_dupes
+        ]
+        
+        # Check for duplicate business licenses
+        result = db.execute(text("""
+            SELECT business_license, COUNT(*) as count, GROUP_CONCAT(email) as emails
+            FROM restaurant_applications 
+            GROUP BY business_license 
+            HAVING COUNT(*) > 1
+        """))
+        license_dupes = result.fetchall()
+        integrity_report["duplicate_licenses"] = [
+            {"license": dupe[0], "count": dupe[1], "emails": dupe[2]}
+            for dupe in license_dupes
+        ]
+        
+        # Check for duplicate food permits
+        result = db.execute(text("""
+            SELECT food_permit, COUNT(*) as count, GROUP_CONCAT(email) as emails
+            FROM restaurant_applications 
+            GROUP BY food_permit 
+            HAVING COUNT(*) > 1
+        """))
+        permit_dupes = result.fetchall()
+        integrity_report["duplicate_permits"] = [
+            {"permit": dupe[0], "count": dupe[1], "emails": dupe[2]}
+            for dupe in permit_dupes
+        ]
+        
+        # Get total applications and status breakdown
+        result = db.execute(text("SELECT COUNT(*) FROM restaurant_applications"))
+        integrity_report["total_applications"] = result.fetchone()[0]
+        
+        result = db.execute(text("""
+            SELECT status, COUNT(*) as count 
+            FROM restaurant_applications 
+            GROUP BY status
+        """))
+        status_counts = result.fetchall()
+        for status_count in status_counts:
+            status_name = {0: "pending", 1: "approved", 2: "rejected"}.get(status_count[0], "unknown")
+            integrity_report["status_breakdown"][status_name] = status_count[1]
+        
+        # Calculate integrity score
+        total_duplicates = (len(integrity_report["duplicate_emails"]) + 
+                          len(integrity_report["duplicate_phones"]) + 
+                          len(integrity_report["duplicate_licenses"]) + 
+                          len(integrity_report["duplicate_permits"]))
+        
+        integrity_report["integrity_score"] = "EXCELLENT" if total_duplicates == 0 else "NEEDS_ATTENTION"
+        integrity_report["issues_found"] = total_duplicates
+        
+        return integrity_report
+        
+    except Exception as e:
+        print(f"Integrity check error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to perform integrity check"
+        )
+
+@router.post("/upload-restaurant-image")
+async def upload_restaurant_image(
+    file: UploadFile = File(...),
+    authorization: str = Header(None), 
+    db: Session = Depends(get_db)
+):
+    """Upload restaurant banner/logo image"""
+    try:
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing or invalid authorization header"
+            )
+        
+        token = authorization.split(" ")[1]
+        
+        from app.utils.security import verify_token
+        
+        payload = verify_token(token)
+        if not payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token"
+            )
+        
+        restaurant_email = payload.get("sub")
+        if not restaurant_email:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload"
+            )
+        
+        # Get restaurant application
+        restaurant_app = db.query(RestaurantApplication).filter(
+            RestaurantApplication.email == restaurant_email,
+            RestaurantApplication.status == ApplicationStatus.APPROVED
+        ).first()
+        
+        if not restaurant_app:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Restaurant not found or not approved"
+            )
+        
+        # Delete old image if exists
+        if restaurant_app.restaurant_image:
+            delete_old_image(restaurant_app.restaurant_image, "restaurant")
+        
+        # Also cleanup any old restaurant images for this restaurant (keep only latest)
+        cleanup_restaurant_images(restaurant_app.id, keep_latest=0)
+        
+        # Validate file type
+        allowed_types = ["image/jpeg", "image/png", "image/jpg", "image/webp"]
+        if file.content_type not in allowed_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only JPEG, PNG, and WebP images are allowed"
+            )
+        
+        # Validate file size (max 5MB)
+        max_size = 5 * 1024 * 1024  # 5MB
+        file_content = await file.read()
+        if len(file_content) > max_size:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File size must be less than 5MB"
+            )
+        
+        # Create uploads directory if it doesn't exist
+        upload_dir = Path("uploads/restaurant_images")
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate unique filename
+        file_extension = file.filename.split('.')[-1] if '.' in file.filename else 'jpg'
+        unique_filename = f"restaurant_{restaurant_app.id}_{uuid.uuid4().hex}.{file_extension}"
+        file_path = upload_dir / unique_filename
+        
+        # Save file
+        with open(file_path, "wb") as buffer:
+            buffer.write(file_content)
+        
+        # Update restaurant record with image URL
+        image_url = f"http://localhost:8000/uploads/restaurant_images/{unique_filename}"
+        restaurant_app.restaurant_image = image_url
+        restaurant_app.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        db.commit()
+        
+        return {
+            "message": "Restaurant image uploaded successfully",
+            "image_url": image_url,
+            "filename": unique_filename
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Upload restaurant image error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to upload restaurant image"
         )
 
 
+
+@router.put("/toggle-online-status")
+async def toggle_restaurant_online_status(
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Toggle restaurant online/offline status"""
+    try:
+        # Verify authorization token
+        if not authorization or not authorization.startswith('Bearer '):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing or invalid authorization token"
+            )
+        
+        token = authorization.split(' ')[1]
+        
+        # Get restaurant from token
+        from app.utils.security import verify_token
+        payload = verify_token(token)
+        if not payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token"
+            )
+        
+        restaurant_email = payload.get("sub")
+        if not restaurant_email:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload"
+            )
+        
+        # Get restaurant application
+        restaurant_app = RestaurantApplication.get_by_email(db, restaurant_email)
+        if not restaurant_app:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Restaurant not found"
+            )
+        
+        if restaurant_app.status != ApplicationStatus.APPROVED:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only approved restaurants can toggle online status"
+            )
+        
+        # Toggle the online status
+        restaurant_app.is_online = not restaurant_app.is_online
+        restaurant_app.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        db.commit()
+        db.refresh(restaurant_app)
+        
+        return {
+            "success": True,
+            "message": f"Restaurant is now {'online' if restaurant_app.is_online else 'offline'}",
+            "is_online": restaurant_app.is_online
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to toggle online status: {str(e)}"
+        )

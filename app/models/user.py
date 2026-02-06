@@ -34,5 +34,11 @@ class User(Base):
     # Relationship with tokens (one-to-many)
     tokens = relationship("UserToken", back_populates="user", cascade="all, delete-orphan")
     
+    # Relationship with cart items (one-to-many)
+    cart_items = relationship("UserCart", back_populates="user", cascade="all, delete-orphan")
+    
+    # Relationship with orders (one-to-many)
+    orders = relationship("Order", back_populates="user", cascade="all, delete-orphan")
+    
     def __repr__(self):
         return f"<User(id={self.id}, email='{self.email}', name='{self.name}')>"

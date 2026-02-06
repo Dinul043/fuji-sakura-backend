@@ -5,8 +5,10 @@ Entry point for the backend server
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from app.core.config import settings
-from app.routes import auth, restaurant, admin_auth
+from app.routes import auth, restaurant, admin_auth, menu, cart
 
 # Create FastAPI application
 app = FastAPI(
@@ -25,6 +27,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Create uploads directory if it doesn't exist
+uploads_dir = Path("uploads")
+uploads_dir.mkdir(exist_ok=True)
+
+# Mount static files for uploaded images
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 # Include authentication routes
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 
@@ -33,6 +42,12 @@ app.include_router(admin_auth.router, prefix="/api/admin", tags=["Admin Authenti
 
 # Include restaurant routes
 app.include_router(restaurant.router, prefix="/api/restaurant", tags=["Restaurant"])
+
+# Include menu management routes
+app.include_router(menu.router, prefix="/api/menu", tags=["Menu Management"])
+
+# Include cart routes
+app.include_router(cart.router, prefix="/api/cart", tags=["Cart Management"])
 
 # Health check endpoint
 @app.get("/")

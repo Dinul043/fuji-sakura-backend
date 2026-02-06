@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import Optional
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, SmallInteger
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, SmallInteger, Boolean
 from sqlalchemy.orm import Session
 from app.core.database import Base, get_db
 
@@ -44,9 +44,13 @@ class RestaurantApplication(Base):
     description = Column(Text, nullable=False)
     business_license = Column(String(255), nullable=False)
     food_permit = Column(String(255), nullable=False)
+    restaurant_image = Column(String(500), nullable=True, comment='Restaurant banner/logo image URL')
     status = Column(SmallInteger, default=ApplicationStatus.PENDING, nullable=False, index=True, 
                    comment='0=pending, 1=approved, 2=rejected')
     admin_notes = Column(Text, nullable=True)
+    
+    # Restaurant operational status
+    is_online = Column(Boolean, default=True, nullable=False)  # Restaurant accepting orders or not
     
     # Timestamps (UTC)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), index=True)
@@ -177,9 +181,18 @@ class RestaurantApplication(Base):
                 self.session_expires_at > current_time)
 
     def has_active_session(self) -> bool:
-        """Check if restaurant has any active session"""
+        """Check if restaurant has any active session that hasn't expired"""
         if not self.active_session_token or not self.session_expires_at:
             return False
         
         current_time = datetime.now(timezone.utc).replace(tzinfo=None)
         return self.session_expires_at > current_time
+
+    def force_clear_expired_sessions(self, db: Session):
+        """Force clear expired sessions"""
+        current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        if self.session_expires_at and self.session_expires_at <= current_time:
+            self.active_session_token = None
+            self.session_expires_at = None
+            self.updated_at = current_time
+            db.commit()

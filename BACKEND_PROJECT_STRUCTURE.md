@@ -182,3 +182,5 @@ MAIL_SERVER=sandbox.smtp.mailtrap.io
 - Rating and review system
 - Analytics and reportingpython admin_manager.py delete "email@company.com"
 
+
+
