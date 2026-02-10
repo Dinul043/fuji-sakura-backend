@@ -68,3 +68,6 @@ class UserCart(Base):
             "restaurantName": self.restaurant_name,
             "totalPrice": self.total_price
         }
+
+        
+

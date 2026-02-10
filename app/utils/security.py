@@ -2,6 +2,7 @@
 Security utilities for password hashing and JWT tokens
 """
 
+
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
@@ -55,12 +56,12 @@ def verify_token(token: str) -> Optional[dict]:
         return None
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials = Depends(security),  # This automatically extracts the JWT token from the request header
     db: Session = Depends(get_db)
 ):
     """Get current user from JWT token"""
     from app.models.user import User  # Import here to avoid circular imports
-    
+ 
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -68,20 +69,20 @@ async def get_current_user(
     )
     
     try:
-        payload = verify_token(credentials.credentials)
+        payload = verify_token(credentials.credentials)  # Decode and verify the token
         if payload is None:
             raise credentials_exception
         
-        user_id_str: str = payload.get("sub")
+        user_id_str: str = payload.get("sub")  # Store user ID inside the token (sub) so we don't need extra DB lookups
         if user_id_str is None:
             raise credentials_exception
-        
+
         user_id = int(user_id_str)
             
     except (JWTError, ValueError):
         raise credentials_exception
     
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id).first()  # Fetch the authenticated user from database
     if user is None:
         raise credentials_exception
     

@@ -1,6 +1,10 @@
 """
 Fuji Sakura Food Delivery - Main FastAPI Application
 Entry point for the backend server
+
+
+It initializes the FastAPI app, configures middleware, serves static files,
+ and connects all feature-based routes like auth, restaurant, menu, and cart.
 """
 
 from fastapi import FastAPI
@@ -29,8 +33,10 @@ app.add_middleware(
 
 # Create uploads directory if it doesn't exist
 uploads_dir = Path("uploads")
-uploads_dir.mkdir(exist_ok=True)
+uploads_dir.mkdir(exist_ok=True)#Prevents runtime errors,Auto-creates directory
 
+'''I used FastAPI’s StaticFiles to serve uploaded images,
+so the frontend can directly access menu and restaurant images'''
 # Mount static files for uploaded images
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
@@ -58,9 +64,7 @@ async def root():
         "version": "1.0.0"
     }
 
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
+
 
 if __name__ == "__main__":
     import uvicorn
