@@ -225,6 +225,10 @@ async def update_menu_item(
                 detail="Menu item not found"
             )
         
+        print(f"🔄 Updating menu item {item_id}")
+        print(f"   Current is_veg: {existing_item.is_veg}")
+        print(f"   New is_veg: {menu_item.is_veg}")
+        
         # Update the item
         existing_item.update_item(
             db=db,
@@ -235,6 +239,8 @@ async def update_menu_item(
             image_url=menu_item.image_url,
             is_veg=menu_item.is_veg
         )
+        
+        print(f"   Updated is_veg: {existing_item.is_veg}")
         
         return MenuItemResponse(**existing_item.to_dict())
         

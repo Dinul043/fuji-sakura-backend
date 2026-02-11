@@ -559,18 +559,12 @@ async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Dep
         # Refresh the application object after cleanup
         db.refresh(application)
         
-        # DEVELOPMENT FIX: For better UX, automatically clear existing session for this user
-        # This prevents the "already logged in" error when users navigate away without logout
+        # Check if restaurant already has an active session
         if application.has_active_session():
-            print(f"🔄 Force clearing existing session for {application.email} to allow re-login")
-            application.clear_session(db)
-            
-        # Note: In production, you might want to keep the session conflict check:
-        # if application.has_active_session():
-        #     raise HTTPException(
-        #         status_code=status.HTTP_409_CONFLICT,
-        #         detail="Restaurant account is already logged in elsewhere. Please logout from the other device first or wait for the session to expire."
-        #     )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Already user is using, wait until logout"
+            )
         
         # Create access token with 8-hour expiry
         expires_delta = timedelta(hours=8)
@@ -740,7 +734,8 @@ async def get_public_restaurant_details(restaurant_id: int, db: Session = Depend
                 "price": item.price,
                 "image_url": item.image_url,
                 "category": item.category,
-                "is_available": item.is_available  # Add availability status
+                "is_available": item.is_available,  # Add availability status
+                "isVeg": item.is_veg  # Add veg/non-veg status
             })
         
         # Calculate restaurant stats
