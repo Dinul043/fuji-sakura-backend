@@ -27,7 +27,7 @@ class RestaurantMenu(Base):
 
     @classmethod
     def create_menu_item(cls, db: Session, restaurant_id: int, item_name: str, description: str, 
-                        price: float, category: str, image_url: str = None) -> 'RestaurantMenu':
+                        price: float, category: str, image_url: str = None, is_veg: bool = True) -> 'RestaurantMenu':
         """Create a new menu item"""
         menu_item = cls(
             restaurant_id=restaurant_id,
@@ -36,7 +36,8 @@ class RestaurantMenu(Base):
             price=price,
             category=category.strip(),
             image_url=image_url.strip() if image_url else None,
-            is_available=True
+            is_available=True,
+            is_veg=is_veg
         )
         
         db.add(menu_item)
@@ -83,7 +84,7 @@ class RestaurantMenu(Base):
 
     def update_item(self, db: Session, **kwargs) -> bool:
         """Update menu item"""
-        allowed_fields = ['item_name', 'description', 'price', 'category', 'image_url', 'is_available']
+        allowed_fields = ['item_name', 'description', 'price', 'category', 'image_url', 'is_available', 'is_veg']
         
         for field, value in kwargs.items():
             if field in allowed_fields and hasattr(self, field):

@@ -19,6 +19,7 @@ class MenuItemRequest(BaseModel):
     price: float
     category: str
     image_url: Optional[str] = None
+    is_veg: bool = True  # Veg/Non-Veg classification
 
     @validator('item_name')
     def validate_item_name(cls, v):
@@ -55,6 +56,7 @@ class MenuItemResponse(BaseModel):
     category: str
     image_url: Optional[str]
     is_available: bool
+    isVeg: bool  # Veg/Non-Veg classification (camelCase for frontend)
     created_at: str
     updated_at: str
 
@@ -162,7 +164,8 @@ async def create_menu_item(
             description=menu_item.description,
             price=menu_item.price,
             category=menu_item.category,
-            image_url=menu_item.image_url
+            image_url=menu_item.image_url,
+            is_veg=menu_item.is_veg
         )
         
         return MenuItemResponse(**new_item.to_dict())
@@ -229,7 +232,8 @@ async def update_menu_item(
             description=menu_item.description,
             price=menu_item.price,
             category=menu_item.category,
-            image_url=menu_item.image_url
+            image_url=menu_item.image_url,
+            is_veg=menu_item.is_veg
         )
         
         return MenuItemResponse(**existing_item.to_dict())
