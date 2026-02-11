@@ -93,7 +93,7 @@ async def add_to_cart(
                 item_price=menu_item.price,
                 item_image_url=menu_item.image_url,
                 item_category=menu_item.category,
-                is_veg=True,  # Default for now, can be enhanced later
+                is_veg=menu_item.is_veg,  # Use actual value from menu item
                 quantity=request.quantity,
                 restaurant_name=restaurant.business_name
             )

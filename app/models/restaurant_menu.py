@@ -15,6 +15,7 @@ class RestaurantMenu(Base):
     category = Column(String(100), nullable=False, index=True)  # Appetizers, Main Course, Desserts, Beverages, etc.
     image_url = Column(String(500), nullable=True)
     is_available = Column(Boolean, default=True, nullable=False, index=True)
+    is_veg = Column(Boolean, default=True, nullable=False)  # Veg/Non-Veg classification
     
     # Timestamps (UTC)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), index=True)
@@ -120,6 +121,7 @@ class RestaurantMenu(Base):
             'category': self.category,
             'image_url': self.image_url,
             'is_available': self.is_available,
+            'isVeg': self.is_veg,  # Convert to camelCase for frontend
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
