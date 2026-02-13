@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from app.core.config import settings
-from app.routes import auth, restaurant, admin_auth, menu, cart
+from app.routes import auth, restaurant, admin_auth, menu, cart, orders
 
 # Create FastAPI application
 app = FastAPI(
@@ -54,6 +54,9 @@ app.include_router(menu.router, prefix="/api/menu", tags=["Menu Management"])
 
 # Include cart routes
 app.include_router(cart.router, prefix="/api/cart", tags=["Cart Management"])
+
+# Include order routes
+app.include_router(orders.router, prefix="/api/orders", tags=["Order Management"])
 
 # Health check endpoint
 @app.get("/")
