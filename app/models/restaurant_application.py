@@ -53,9 +53,8 @@ class RestaurantApplication(Base):
     is_online = Column(Boolean, default=True, nullable=False)  # Restaurant accepting orders or not
     
     # Timestamps (UTC)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), index=True)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), 
-                       onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     reviewed_at = Column(DateTime, nullable=True)
     
     # Session Management

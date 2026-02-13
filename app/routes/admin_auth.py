@@ -500,7 +500,7 @@ async def reactivate_admin(
         
         # Reactivate the admin
         target_admin.is_active = True
-        target_admin.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        target_admin.updated_at = datetime.now()
         db.commit()
         
         return {

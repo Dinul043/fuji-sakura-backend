@@ -15,6 +15,7 @@ from app.models.user_cart import UserCart
 from app.models.restaurant_menu import RestaurantMenu
 from app.models.restaurant_application import RestaurantApplication
 from app.utils.security import get_current_user
+from app.utils.websocket_manager import manager
 
 router = APIRouter()
 
@@ -109,7 +110,7 @@ async def create_order(
                 estimated_delivery_time=30,
                 payment_method=request.payment_method,
                 special_instructions=request.special_instructions,
-                confirmed_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                confirmed_at=datetime.now()
             )
             
             db.add(order)
@@ -261,10 +262,18 @@ async def update_order_status(
         
         # Update delivered_at if status is delivered
         if new_status == OrderStatus.DELIVERED:
-            order.delivered_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            order.delivered_at = datetime.now()
         
         db.commit()
         db.refresh(order)
+        
+        # Broadcast update via WebSocket
+        await manager.send_order_update(order_id, {
+            "type": "order_status_update",
+            "order_id": order_id,
+            "status": new_status.value,
+            "order": order.to_dict()
+        })
         
         return {
             "message": "Order status updated successfully",

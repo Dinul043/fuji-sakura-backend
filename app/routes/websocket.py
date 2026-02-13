@@ -1,0 +1,58 @@
+"""
+WebSocket endpoints for real-time updates
+"""
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from sqlalchemy.orm import Session
+from app.core.database import get_db
+from app.utils.websocket_manager import manager
+from app.utils.security import verify_token
+import json
+
+router = APIRouter()
+
+@router.websocket("/ws/orders/{order_id}")
+async def websocket_order_tracking(
+    websocket: WebSocket,
+    order_id: int
+):
+    """WebSocket endpoint for real-time order tracking"""
+    await manager.connect_order(websocket, order_id)
+    try:
+        while True:
+            # Keep connection alive and listen for messages
+            data = await websocket.receive_text()
+            # Echo back for heartbeat
+            await websocket.send_json({"type": "heartbeat", "status": "connected"})
+    except WebSocketDisconnect:
+        manager.disconnect_order(websocket, order_id)
+
+@router.websocket("/ws/restaurant/{restaurant_id}")
+async def websocket_restaurant_updates(
+    websocket: WebSocket,
+    restaurant_id: int
+):
+    """WebSocket endpoint for restaurant status updates"""
+    await manager.connect_restaurant_watcher(websocket, restaurant_id)
+    try:
+        while True:
+            # Keep connection alive
+            data = await websocket.receive_text()
+            await websocket.send_json({"type": "heartbeat", "status": "connected"})
+    except WebSocketDisconnect:
+        manager.disconnect_restaurant_watcher(websocket, restaurant_id)
+
+@router.websocket("/ws/user/{user_id}")
+async def websocket_user_updates(
+    websocket: WebSocket,
+    user_id: int
+):
+    """WebSocket endpoint for user-specific updates"""
+    await manager.connect_user(websocket, user_id)
+    try:
+        while True:
+            # Keep connection alive
+            data = await websocket.receive_text()
+            await websocket.send_json({"type": "heartbeat", "status": "connected"})
+    except WebSocketDisconnect:
+        manager.disconnect_user(websocket, user_id)

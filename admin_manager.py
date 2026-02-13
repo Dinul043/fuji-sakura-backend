@@ -15,6 +15,7 @@ Commands:
   change-password <email> <new_password> - Change admin password
 """
 
+
 import sys
 import os
 from datetime import datetime, timezone
@@ -305,6 +306,7 @@ def main():
     elif command == "list":
         list_admins()
     
+    
     elif command == "activate":
         if len(sys.argv) != 3:
             print("❌ Usage: python admin_manager.py activate <email>")
@@ -360,3 +362,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
+  

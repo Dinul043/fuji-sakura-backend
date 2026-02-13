@@ -70,9 +70,8 @@ class Order(Base):
     special_instructions = Column(Text, nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), 
-                       onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     confirmed_at = Column(DateTime, nullable=True)
     delivered_at = Column(DateTime, nullable=True)
     
@@ -135,7 +134,7 @@ class OrderItem(Base):
     special_instructions = Column(Text, nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    created_at = Column(DateTime, default=datetime.now)
     
     # Relationships
     order = relationship("Order", back_populates="order_items")

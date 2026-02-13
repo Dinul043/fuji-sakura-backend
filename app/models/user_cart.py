@@ -34,9 +34,8 @@ class UserCart(Base):
     restaurant_name = Column(String(255), nullable=False)
     
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), 
-                       onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
     # Relationships
     user = relationship("User", back_populates="cart_items")

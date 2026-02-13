@@ -13,6 +13,7 @@ from app.models.restaurant_application import RestaurantApplication, Application
 from app.models.restaurant_menu import RestaurantMenu
 from app.utils.security import verify_password, get_password_hash, create_access_token
 from app.utils.file_cleanup import delete_old_image, cleanup_restaurant_images
+from app.utils.websocket_manager import manager
 
 router = APIRouter()
 
@@ -384,8 +385,23 @@ async def update_restaurant_profile(
                 setattr(restaurant_app, field, profile_data[field])
         
         # Update timestamp
-        restaurant_app.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        restaurant_app.updated_at = datetime.now()
         db.commit()
+        db.refresh(restaurant_app)
+        
+        # Broadcast restaurant profile update via WebSocket
+        await manager.broadcast_restaurant_update(restaurant_app.id, {
+            "type": "restaurant_profile_updated",
+            "restaurant_id": restaurant_app.id,
+            "restaurant": {
+                "id": restaurant_app.id,
+                "name": restaurant_app.business_name,
+                "cuisine": restaurant_app.cuisine_type,
+                "description": restaurant_app.description,
+                "address": restaurant_app.address,
+                "phone": restaurant_app.phone
+            }
+        })
         
         return {
             "message": "Restaurant profile updated successfully",
@@ -488,7 +504,7 @@ async def debug_session_status(authorization: str = Header(None), db: Session = 
         if not restaurant_app:
             return {"error": "Restaurant not found"}
         
-        current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        current_time = datetime.now()
         
         return {
             "restaurant_email": restaurant_email,
@@ -545,7 +561,7 @@ async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Dep
         application.force_clear_expired_sessions(db)
         
         # Also clear any sessions that are older than 8 hours (safety cleanup)
-        current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        current_time = datetime.now()
         cleanup_time = current_time - timedelta(hours=8)
         
         # Clear old sessions for all restaurants (cleanup)
@@ -574,7 +590,7 @@ async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Dep
         )
         
         # Calculate session expiry time
-        session_expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + expires_delta
+        session_expires_at = datetime.now() + expires_delta
         
         # Set active session in database
         application.set_active_session(db, access_token, session_expires_at)
@@ -1044,7 +1060,7 @@ async def upload_restaurant_image(
         # Update restaurant record with image URL
         image_url = f"http://localhost:8000/uploads/restaurant_images/{unique_filename}"
         restaurant_app.restaurant_image = image_url
-        restaurant_app.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        restaurant_app.updated_at = datetime.now()
         db.commit()
         
         return {
@@ -1112,9 +1128,17 @@ async def toggle_restaurant_online_status(
         
         # Toggle the online status
         restaurant_app.is_online = not restaurant_app.is_online
-        restaurant_app.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        restaurant_app.updated_at = datetime.now()
         db.commit()
         db.refresh(restaurant_app)
+        
+        # Broadcast restaurant status update via WebSocket
+        await manager.broadcast_restaurant_update(restaurant_app.id, {
+            "type": "restaurant_status_update",
+            "restaurant_id": restaurant_app.id,
+            "is_online": restaurant_app.is_online,
+            "restaurant_name": restaurant_app.business_name
+        })
         
         return {
             "success": True,

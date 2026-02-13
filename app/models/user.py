@@ -25,9 +25,8 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     
     # Timestamps (all in UTC)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), 
-                       onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     last_login = Column(DateTime, nullable=True)
     deleted_at = Column(DateTime, nullable=True)  # Soft delete for future
     

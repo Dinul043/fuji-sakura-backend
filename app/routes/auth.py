@@ -172,7 +172,7 @@ def signup(user_data: UserSignup, db: Session = Depends(get_db)):
                 full_name = f"{user_data.firstName} {user_data.lastName}".strip()
                 existing_user.name = full_name
                 existing_user.password = get_password_hash(user_data.password.strip())
-                existing_user.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                existing_user.updated_at = datetime.now()
                 
                 # Generate new OTP (clear any old OTP)
                 token = get_or_create_user_token(db, existing_user.id)
@@ -336,8 +336,8 @@ def verify_otp(otp_data: OTPVerification, db: Session = Depends(get_db)):
         
         # OTP verified - activate account and clear tokens
         user.is_verified = True
-        user.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
-        user.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        user.last_login = datetime.now()
+        user.updated_at = datetime.now()
         
         # Clear all tokens for this user (OTP no longer needed)
         clear_user_tokens(db, user.id)
@@ -405,7 +405,7 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
             )
         
         # Update last login (but don't update updated_at for just login)
-        user.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
+        user.last_login = datetime.now()
         # Note: updated_at should only change when profile data changes
         db.commit()
         
@@ -639,7 +639,7 @@ def reset_password(reset_data: ResetPassword, db: Session = Depends(get_db)):
         
         # Update password and clear reset tokens
         user.password = get_password_hash(reset_data.newPassword.strip())
-        user.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        user.updated_at = datetime.now()
         
         # Clear all tokens for this user
         clear_user_tokens(db, user.id)
@@ -692,7 +692,7 @@ def update_user_details(user_data: UpdateUserDetails, db: Session = Depends(get_
         full_name = f"{user_data.firstName} {user_data.lastName}".strip()
         user.name = full_name
         user.password = get_password_hash(user_data.password.strip())
-        user.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        user.updated_at = datetime.now()
         
         db.commit()
         db.refresh(user)

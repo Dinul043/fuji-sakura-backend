@@ -7,6 +7,7 @@ from app.core.database import get_db
 from app.models.restaurant_menu import RestaurantMenu, MenuCategory
 from app.models.restaurant_application import RestaurantApplication, ApplicationStatus
 from app.utils.security import verify_token
+from app.utils.websocket_manager import manager
 import os
 import uuid
 from pathlib import Path
@@ -98,6 +99,8 @@ def get_authenticated_restaurant(authorization: str, db: Session) -> RestaurantA
             detail="Restaurant not found or not approved"
         )
     
+    print(f"🔐 Authenticated Restaurant: {restaurant_app.business_name} (ID: {restaurant_app.id}, Email: {restaurant_app.email})")
+    
     # Validate session is still active
     if not restaurant_app.is_session_active(token):
         raise HTTPException(
@@ -167,6 +170,13 @@ async def create_menu_item(
             image_url=menu_item.image_url,
             is_veg=menu_item.is_veg
         )
+        
+        # Broadcast new menu item via WebSocket
+        await manager.broadcast_restaurant_update(restaurant.id, {
+            "type": "menu_item_added",
+            "restaurant_id": restaurant.id,
+            "menu_item": new_item.to_dict()
+        })
         
         return MenuItemResponse(**new_item.to_dict())
         
@@ -242,6 +252,13 @@ async def update_menu_item(
         
         print(f"   Updated is_veg: {existing_item.is_veg}")
         
+        # Broadcast menu item update via WebSocket
+        await manager.broadcast_restaurant_update(existing_item.restaurant_id, {
+            "type": "menu_item_updated",
+            "restaurant_id": existing_item.restaurant_id,
+            "menu_item": existing_item.to_dict()
+        })
+        
         return MenuItemResponse(**existing_item.to_dict())
         
     except HTTPException:
@@ -271,6 +288,15 @@ async def toggle_menu_item_availability(
             )
         
         new_availability = menu_item.toggle_availability(db)
+        
+        # Broadcast menu item availability update via WebSocket
+        await manager.broadcast_restaurant_update(menu_item.restaurant_id, {
+            "type": "menu_item_availability_update",
+            "restaurant_id": menu_item.restaurant_id,
+            "menu_item_id": item_id,
+            "is_available": new_availability,
+            "item_name": menu_item.item_name
+        })
         
         return {
             "message": f"Menu item {'enabled' if new_availability else 'disabled'} successfully",
@@ -305,16 +331,34 @@ async def delete_menu_item(
             )
         
         item_name = menu_item.item_name
-        menu_item.delete_item(db)
+        restaurant_id = menu_item.restaurant_id  # Save this BEFORE deleting
         
+        # Delete related cart items first to avoid foreign key constraint
+        from app.models.user_cart import UserCart
+        db.query(UserCart).filter(UserCart.menu_item_id == item_id).delete()
+        
+        # Now delete the menu item
+        db.delete(menu_item)
+        db.commit()
+        
+        # Broadcast menu item deletion via WebSocket
+        await manager.broadcast_restaurant_update(restaurant_id, {
+            "type": "menu_item_deleted",
+            "restaurant_id": restaurant_id,
+            "menu_item_id": item_id,
+            "item_name": item_name
+        })
+
         return {
             "message": f"Menu item '{item_name}' deleted successfully",
             "item_id": item_id
         }
         
     except HTTPException:
+        db.rollback()
         raise
     except Exception as e:
+        db.rollback()
         print(f"Delete menu item error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -396,7 +440,7 @@ async def upload_menu_image(
             buffer.write(file_content)
         
         # Return the file URL (accessible via the static file mount)
-        image_url = f"http://localhost:8000/uploads/menu_images/{unique_filename}"
+        image_url = f"uploads/menu_images/{unique_filename}"
         
         return {
             "message": "Image uploaded successfully",
