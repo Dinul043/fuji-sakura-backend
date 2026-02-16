@@ -16,9 +16,9 @@ class Admin(Base):
     is_super_admin = Column(Boolean, default=False, nullable=False, index=True)
     
     # Timestamps (UTC)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), index=True)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), 
-                       onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    created_at = Column(DateTime, default=lambda: datetime.now(), index=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(), 
+                       onupdate=lambda: datetime.now())
     last_login = Column(DateTime, nullable=True)
     created_by = Column(Integer, nullable=True)  # ID of admin who created this admin
 
@@ -64,13 +64,13 @@ class Admin(Base):
 
     def update_last_login(self, db: Session):
         """Update last login timestamp"""
-        self.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.last_login = datetime.now()
         db.commit()
 
     def deactivate(self, db: Session):
         """Deactivate admin account"""
         self.is_active = False
-        self.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.updated_at = datetime.now()
         db.commit()
 
     def to_dict(self) -> dict:

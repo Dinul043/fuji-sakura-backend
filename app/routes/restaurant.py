@@ -1058,7 +1058,7 @@ async def upload_restaurant_image(
             buffer.write(file_content)
         
         # Update restaurant record with image URL
-        image_url = f"http://localhost:8000/uploads/restaurant_images/{unique_filename}"
+        image_url = f"/uploads/restaurant_images/{unique_filename}"
         restaurant_app.restaurant_image = image_url
         restaurant_app.updated_at = datetime.now()
         db.commit()

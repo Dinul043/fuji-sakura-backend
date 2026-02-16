@@ -61,16 +61,6 @@ app.include_router(orders.router, prefix="/api/orders", tags=["Order Management"
 # Include WebSocket routes
 app.include_router(websocket.router, tags=["WebSocket"])
 
-# Health check endpoint
-@app.get("/")
-async def root():
-    return {
-        "message": "Fuji Sakura Food Delivery API",
-        "status": "running",
-        "version": "1.0.0"
-    }
-
-
 
 if __name__ == "__main__":
     import uvicorn

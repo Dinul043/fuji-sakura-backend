@@ -22,7 +22,7 @@ class UserToken(Base):
     reset_token_expires_at = Column(DateTime, nullable=True)
     
     # Timestamps (UTC)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    created_at = Column(DateTime, default=lambda: datetime.now())
     
     # Relationship
     user = relationship("User", back_populates="tokens")

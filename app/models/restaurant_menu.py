@@ -92,7 +92,7 @@ class RestaurantMenu(Base):
                 else:
                     setattr(self, field, value)
         
-        self.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.updated_at = datetime.now()
         db.commit()
         db.refresh(self)
         return True
@@ -100,7 +100,7 @@ class RestaurantMenu(Base):
     def toggle_availability(self, db: Session) -> bool:
         """Toggle item availability"""
         self.is_available = not self.is_available
-        self.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.updated_at = datetime.now()
         db.commit()
         return self.is_available
 

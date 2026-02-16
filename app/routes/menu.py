@@ -440,7 +440,7 @@ async def upload_menu_image(
             buffer.write(file_content)
         
         # Return the file URL (accessible via the static file mount)
-        image_url = f"uploads/menu_images/{unique_filename}"
+        image_url = f"/uploads/menu_images/{unique_filename}"
         
         return {
             "message": "Image uploaded successfully",

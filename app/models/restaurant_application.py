@@ -124,9 +124,9 @@ class RestaurantApplication(Base):
         """Update application status"""
         self.status = new_status
         self.admin_notes = admin_notes
-        self.reviewed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.reviewed_at = datetime.now()
         self.reviewed_by = reviewed_by
-        self.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.updated_at = datetime.now()
         
         db.commit()
         db.refresh(self)
@@ -157,16 +157,16 @@ class RestaurantApplication(Base):
     def set_active_session(self, db: Session, session_token: str, expires_at: datetime):
         """Set active session for restaurant"""
         self.active_session_token = session_token
-        self.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.last_login = datetime.now()
         self.session_expires_at = expires_at
-        self.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.updated_at = datetime.now()
         db.commit()
 
     def clear_session(self, db: Session):
         """Clear active session"""
         self.active_session_token = None
         self.session_expires_at = None
-        self.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.updated_at = datetime.now()
         db.commit()
 
     def is_session_active(self, session_token: str) -> bool:
@@ -175,7 +175,7 @@ class RestaurantApplication(Base):
             return False
         
         # Check if token matches and not expired
-        current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        current_time = datetime.now()
         return (self.active_session_token == session_token and 
                 self.session_expires_at > current_time)
 
@@ -184,12 +184,12 @@ class RestaurantApplication(Base):
         if not self.active_session_token or not self.session_expires_at:
             return False
         
-        current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        current_time = datetime.now()
         return self.session_expires_at > current_time
 
     def force_clear_expired_sessions(self, db: Session):
         """Force clear expired sessions"""
-        current_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        current_time = datetime.now()
         if self.session_expires_at and self.session_expires_at <= current_time:
             self.active_session_token = None
             self.session_expires_at = None
