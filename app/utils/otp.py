@@ -17,12 +17,12 @@ def generate_reset_token() -> str:
 
 def is_otp_expired(expires_at: datetime) -> bool:
     """Check if OTP has expired"""
-    return datetime.now(timezone.utc).replace(tzinfo=None) > expires_at
+    return datetime.now() > expires_at
 
 def get_otp_expiry() -> datetime:
-    """Get OTP expiry time (10 minutes from now) in UTC"""
-    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=settings.OTP_EXPIRE_MINUTES)
+    """Get OTP expiry time (10 minutes from now)"""
+    return datetime.now() + timedelta(minutes=settings.OTP_EXPIRE_MINUTES)
 
 def get_reset_token_expiry() -> datetime:
-    """Get reset token expiry time (30 minutes from now) in UTC"""
-    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=settings.RESET_TOKEN_EXPIRE_MINUTES)
+    """Get reset token expiry time (30 minutes from now)"""
+    return datetime.now() + timedelta(minutes=settings.RESET_TOKEN_EXPIRE_MINUTES)
