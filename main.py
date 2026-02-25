@@ -2,7 +2,6 @@
 Fuji Sakura Food Delivery - Main FastAPI Application
 Entry point for the backend server
 
-
 It initializes the FastAPI app, configures middleware, serves static files,
  and connects all feature-based routes like auth, restaurant, menu, and cart.
 """
@@ -30,7 +29,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 # Create uploads directory if it doesn't exist
 uploads_dir = Path("uploads")
 uploads_dir.mkdir(exist_ok=True)#Prevents runtime errors,Auto-creates directory
@@ -70,3 +68,7 @@ if __name__ == "__main__":
         port=8000,
         reload=settings.DEBUG
     )
+
+
+
+    

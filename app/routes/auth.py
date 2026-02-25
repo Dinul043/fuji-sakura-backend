@@ -709,6 +709,7 @@ def update_user_details(user_data: UpdateUserDetails, db: Session = Depends(get_
             }
         }
         
+        
     except HTTPException:
         raise
     except Exception as e:

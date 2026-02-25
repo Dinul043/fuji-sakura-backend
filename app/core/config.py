@@ -2,7 +2,6 @@
 Configuration settings for the application
 Loads environment variables and provides app settings
 """
-
 from pydantic_settings import BaseSettings
 from typing import Optional
 
@@ -13,7 +12,7 @@ class Settings(BaseSettings):
     
     # Database Configuration
     DATABASE_URL: str = "mysql+pymysql://root:password@localhost:3306/fuji_sakura_db"
-    
+   
     # JWT Configuration
     SECRET_KEY: str = "fuji-sakura-super-secret-key-2024"
     ALGORITHM: str = "HS256"

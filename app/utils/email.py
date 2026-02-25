@@ -326,13 +326,13 @@ def send_restaurant_approval_email(email: str, restaurant_name: str, owner_name:
         Dear {owner_name},
         
         We are excited to inform you that your restaurant partnership application for {restaurant_name} has been approved!
-        
+      
         What's Next?
         - Restaurant Dashboard Access: Coming soon - you'll receive login credentials
         - Menu Setup: Add your delicious dishes and set pricing
         - Order Management: Start receiving and managing customer orders
         - Analytics: Track your restaurant's performance
-        
+      
         Our team will contact you within 24-48 hours with detailed onboarding instructions.
         
         Welcome to the Fuji Sakura family!
