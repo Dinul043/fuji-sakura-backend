@@ -157,7 +157,7 @@ async def create_admin(
     authorization: str = Header(None), 
     db: Session = Depends(get_db)
 ):
-    """Create a new admin account - only accessible by authenticated admins"""
+    """Create a new admin account - ONLY accessible by SUPER ADMINS"""
     try:
         # Verify admin token
         if not authorization or not authorization.startswith("Bearer "):
@@ -190,17 +190,18 @@ async def create_admin(
                 detail="Invalid token payload"
             )
         
-        # Check if requesting admin exists and is active
+        # Check if requesting admin exists, is active, AND is SUPER ADMIN
         requesting_admin = db.query(Admin).filter(
             Admin.id == admin_id,
             Admin.email == admin_email,
-            Admin.is_active == True
+            Admin.is_active == True,
+            Admin.is_super_admin == True  # ONLY SUPER ADMINS CAN CREATE ADMINS
         ).first()
         
         if not requesting_admin:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Admin account not found or inactive"
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only super admins can create new admin accounts"
             )
         
         # Validate input
@@ -259,7 +260,7 @@ async def list_admins(
     authorization: str = Header(None), 
     db: Session = Depends(get_db)
 ):
-    """List all admins - only accessible by authenticated admins"""
+    """List all admins - ONLY accessible by SUPER ADMINS"""
     try:
         # Verify admin token
         if not authorization or not authorization.startswith("Bearer "):
@@ -292,17 +293,18 @@ async def list_admins(
                 detail="Invalid token payload"
             )
         
-        # Check if requesting admin exists and is active
+        # Check if requesting admin exists, is active, AND is SUPER ADMIN
         requesting_admin = db.query(Admin).filter(
             Admin.id == admin_id,
             Admin.email == admin_email,
-            Admin.is_active == True
+            Admin.is_active == True,
+            Admin.is_super_admin == True  # ONLY SUPER ADMINS CAN VIEW ADMIN LIST
         ).first()
         
         if not requesting_admin:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Admin account not found or inactive"
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only super admins can view admin list"
             )
         
         # Get all admins (including inactive ones for super admin view)
