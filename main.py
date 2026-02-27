@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from app.core.config import settings
-from app.routes import auth, restaurant, admin_auth, menu, cart, orders, websocket
+from app.routes import auth, restaurant, admin_auth, menu, cart, orders, websocket, payment
 
 # Create FastAPI application
 app = FastAPI(
@@ -55,6 +55,9 @@ app.include_router(cart.router, prefix="/api/cart", tags=["Cart Management"])
 
 # Include order routes
 app.include_router(orders.router, prefix="/api/orders", tags=["Order Management"])
+
+# Include payment routes
+app.include_router(payment.router, prefix="/api/payments", tags=["Payment Processing"])
 
 # Include WebSocket routes
 app.include_router(websocket.router, tags=["WebSocket"])

@@ -7,5 +7,6 @@ from .restaurant_menu import RestaurantMenu
 from .admin import Admin
 from .user_cart import UserCart
 from .orders import Order, OrderItem
+from .payment import Payment
 
-__all__ = ["User", "UserToken", "RestaurantApplication", "RestaurantMenu", "Admin", "UserCart", "Order", "OrderItem"]
+__all__ = ["User", "UserToken", "RestaurantApplication", "RestaurantMenu", "Admin", "UserCart", "Order", "OrderItem", "Payment"]

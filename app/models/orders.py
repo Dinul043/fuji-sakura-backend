@@ -79,6 +79,7 @@ class Order(Base):
     user = relationship("User", back_populates="orders")
     restaurant = relationship("RestaurantApplication")
     order_items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
+    payments = relationship("Payment", back_populates="order", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Order(id={self.id}, order_number='{self.order_number}', status='{self.status}')>"

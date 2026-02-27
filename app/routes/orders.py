@@ -10,7 +10,8 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 from app.core.database import get_db
 from app.models.user import User
-from app.models.orders import Order, OrderItem, OrderStatus, PaymentStatus
+from app.models.orders import Order, OrderItem, OrderStatus, PaymentStatus as OrderPaymentStatus
+from app.models.payment import Payment, PaymentStatus, PaymentMethod
 from app.models.user_cart import UserCart
 from app.models.restaurant_menu import RestaurantMenu
 from app.models.restaurant_application import RestaurantApplication
@@ -71,7 +72,7 @@ async def create_order(
             
             if not restaurant:
                 continue
-            
+
             # Calculate totals
             subtotal = sum(item.total_price for item in items)
             delivery_fee = 2.99
@@ -94,8 +95,8 @@ async def create_order(
                 order_number=order_number,
                 user_id=current_user.id,
                 restaurant_id=restaurant_id,
-                status=OrderStatus.CONFIRMED,
-                payment_status=PaymentStatus.PENDING if request.payment_method != 'cod' else PaymentStatus.PAID,
+                status=OrderStatus.CONFIRMED if request.payment_method == 'cod' else OrderStatus.PENDING,
+                payment_status=OrderPaymentStatus.PENDING,
                 subtotal=subtotal,
                 delivery_fee=delivery_fee,
                 tax_amount=tax_amount,
@@ -110,11 +111,34 @@ async def create_order(
                 estimated_delivery_time=30,
                 payment_method=request.payment_method,
                 special_instructions=request.special_instructions,
-                confirmed_at=datetime.now()
+                confirmed_at=datetime.now() if request.payment_method == 'cod' else None
             )
             
             db.add(order)
             db.flush()  # Get order ID
+            
+            # Create payment record
+            # Map payment method string to enum
+            payment_method_map = {
+                'cod': PaymentMethod.COD,
+                'card': PaymentMethod.CARD,
+                'upi': PaymentMethod.UPI,
+                'wallet': PaymentMethod.WALLET,
+                'cash on delivery': PaymentMethod.COD,
+                'credit card': PaymentMethod.CARD,
+                'debit card': PaymentMethod.CARD,
+            }
+            
+            payment_method_str = request.payment_method.lower().strip()
+            payment_method_enum = payment_method_map.get(payment_method_str, PaymentMethod.COD)
+            
+            payment = Payment(
+                order_id=order.id,
+                payment_method=payment_method_enum,
+                amount=total_amount,
+                payment_status=PaymentStatus.PENDING
+            )
+            db.add(payment)
             
             # Create order items
             for cart_item in items:
@@ -154,10 +178,12 @@ async def create_order(
         raise
     except Exception as e:
         db.rollback()
+        import traceback
         print(f"❌ Error creating order: {str(e)}")
+        print(f"❌ Full traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create order. Please try again."
+            detail=f"Failed to create order: {str(e)}"
         )
 
 @router.get("/", response_model=List[Dict[str, Any]])
@@ -336,3 +362,5 @@ async def cancel_order(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to cancel order"
         )
+    
+    
