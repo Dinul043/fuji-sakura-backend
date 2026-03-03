@@ -10,10 +10,8 @@ from enum import Enum as PyEnum
 from app.core.database import Base
 
 class PaymentMethod(PyEnum):
-    CARD = "card"
-    UPI = "upi"
-    WALLET = "wallet"
-    COD = "cod"
+    ONLINE = "ONLINE"  # Razorpay handles card/upi/wallet
+    COD = "COD"        # Cash on delivery
 
 class PaymentStatus(PyEnum):
     PENDING = "pending"

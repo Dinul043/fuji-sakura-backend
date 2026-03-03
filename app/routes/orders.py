@@ -118,19 +118,21 @@ async def create_order(
             db.flush()  # Get order ID
             
             # Create payment record
-            # Map payment method string to enum
+            # Map payment method string to enum (case-insensitive)
             payment_method_map = {
                 'cod': PaymentMethod.COD,
-                'card': PaymentMethod.CARD,
-                'upi': PaymentMethod.UPI,
-                'wallet': PaymentMethod.WALLET,
+                'online': PaymentMethod.ONLINE,
                 'cash on delivery': PaymentMethod.COD,
-                'credit card': PaymentMethod.CARD,
-                'debit card': PaymentMethod.CARD,
+                # Legacy support (in case old values come through)
+                'card': PaymentMethod.ONLINE,
+                'upi': PaymentMethod.ONLINE,
+                'wallet': PaymentMethod.ONLINE,
+                'credit card': PaymentMethod.ONLINE,
+                'debit card': PaymentMethod.ONLINE,
             }
             
             payment_method_str = request.payment_method.lower().strip()
-            payment_method_enum = payment_method_map.get(payment_method_str, PaymentMethod.COD)
+            payment_method_enum = payment_method_map.get(payment_method_str, PaymentMethod.ONLINE)
             
             payment = Payment(
                 order_id=order.id,
@@ -156,9 +158,11 @@ async def create_order(
                 )
                 db.add(order_item)
             
-            # Remove items from cart
-            for cart_item in items:
-                db.delete(cart_item)
+            # For COD orders, remove items from cart immediately
+            # For online payments, cart will be cleared after successful payment
+            if request.payment_method == 'cod':
+                for cart_item in items:
+                    db.delete(cart_item)
             
             created_orders.append(order)
         
@@ -191,10 +195,13 @@ async def get_user_orders(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get all orders for the current user"""
+    """Get all orders for the current user (excluding pending unpaid orders)"""
     try:
+        # Only show orders that are confirmed or beyond
+        # Exclude PENDING orders (waiting for payment)
         orders = db.query(Order).filter(
-            Order.user_id == current_user.id
+            Order.user_id == current_user.id,
+            Order.status != OrderStatus.PENDING  # Exclude pending orders
         ).order_by(Order.created_at.desc()).all()
         
         return [order.to_dict() for order in orders]

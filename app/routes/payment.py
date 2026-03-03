@@ -17,6 +17,84 @@ from app.models.user import User
 
 router = APIRouter()
 
+# Debug endpoint to test Razorpay
+@router.get("/razorpay/test")
+async def test_razorpay():
+    """Test Razorpay configuration"""
+    try:
+        from app.core.config import settings
+        
+        # Test order creation
+        result = razorpay_service.create_order(
+            amount=100.0,
+            order_id=999
+        )
+        
+        return {
+            "config": {
+                "key_id": settings.RAZORPAY_KEY_ID,
+                "payment_mode": settings.PAYMENT_MODE
+            },
+            "test_result": result
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+@router.get("/razorpay/test-with-order/{order_id}")
+async def test_razorpay_with_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Test Razorpay with actual order"""
+    try:
+        # Get order
+        order = db.query(Order).filter(
+            Order.id == order_id,
+            Order.user_id == current_user.id
+        ).first()
+        
+        if not order:
+            return {"error": "Order not found"}
+        
+        # Get payment
+        payment = db.query(Payment).filter(
+            Payment.order_id == order.id
+        ).order_by(Payment.created_at.desc()).first()
+        
+        if not payment:
+            return {"error": "Payment not found"}
+        
+        # Try to create Razorpay order
+        result = razorpay_service.create_order(
+            amount=payment.amount,
+            order_id=order.id
+        )
+        
+        return {
+            "order": {
+                "id": order.id,
+                "status": order.status.value,
+                "total": payment.amount
+            },
+            "payment": {
+                "id": payment.id,
+                "method": payment.payment_method.value,
+                "status": payment.payment_status.value
+            },
+            "razorpay_result": result
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
 # Request/Response Models
 class PaymentInitiateRequest(BaseModel):
     order_id: int
@@ -304,4 +382,269 @@ async def get_payment_status(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get payment status"
+        )
+
+
+# ============================================
+# RAZORPAY INTEGRATION ROUTES
+# ============================================
+
+from app.services.razorpay_service import razorpay_service
+from app.core.config import settings
+
+class RazorpayOrderRequest(BaseModel):
+    order_id: int
+
+class RazorpayVerifyRequest(BaseModel):
+    order_id: int
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+@router.post("/razorpay/create-order")
+async def create_razorpay_order(
+    request: RazorpayOrderRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Create Razorpay order for payment
+    Returns razorpay_order_id and key_id for frontend
+    """
+    try:
+        # Get order
+        order = db.query(Order).filter(
+            Order.id == request.order_id,
+            Order.user_id == current_user.id
+        ).first()
+        
+        if not order:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Order not found"
+            )
+        
+        # Check if order is in correct state
+        if order.status != OrderStatus.PENDING:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot create payment for order with status: {order.status.value}"
+            )
+        
+        # Get payment record
+        payment = db.query(Payment).filter(
+            Payment.order_id == order.id
+        ).order_by(Payment.created_at.desc()).first()
+        
+        if not payment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Payment record not found"
+            )
+        
+        # Check payment mode
+        if settings.PAYMENT_MODE != "razorpay":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Razorpay payment mode is not enabled"
+            )
+        
+        # Create Razorpay order
+        print(f"Creating Razorpay order for order_id={order.id}, amount={payment.amount}")
+        try:
+            razorpay_result = razorpay_service.create_order(
+                amount=payment.amount,
+                order_id=order.id
+            )
+            
+            print(f"Razorpay result: {razorpay_result}")
+            
+            if not razorpay_result["success"]:
+                error_msg = razorpay_result.get('error', 'Unknown error')
+                print(f"❌ Razorpay order creation failed: {error_msg}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to create Razorpay order: {error_msg}"
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"❌ Exception in Razorpay order creation: {str(e)}")
+            import traceback
+            print(f"❌ Traceback: {traceback.format_exc()}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Razorpay error: {str(e)}"
+            )
+        
+        # Update payment record with Razorpay order ID
+        payment.gateway_order_id = razorpay_result["razorpay_order_id"]
+        payment.payment_initiated_at = datetime.now()
+        payment.updated_at = datetime.now()
+        db.commit()
+        db.refresh(payment)
+        
+        return {
+            "success": True,
+            "razorpay_key_id": settings.RAZORPAY_KEY_ID,
+            "razorpay_order_id": razorpay_result["razorpay_order_id"],
+            "amount": razorpay_result["amount"],  # Amount in paise
+            "currency": razorpay_result["currency"],
+            "order_id": order.id,
+            "order_number": order.order_number
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Create Razorpay order error: {e}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create Razorpay order"
+        )
+
+@router.post("/razorpay/verify")
+async def verify_razorpay_payment(
+    request: RazorpayVerifyRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Verify Razorpay payment signature and update order status
+    This is called after user completes payment in Razorpay popup
+    """
+    try:
+        print(f"\n{'='*60}")
+        print(f"PAYMENT VERIFICATION REQUEST")
+        print(f"{'='*60}")
+        print(f"Order ID: {request.order_id}")
+        print(f"User ID: {current_user.id}")
+        print(f"Razorpay Order ID: {request.razorpay_order_id}")
+        print(f"Razorpay Payment ID: {request.razorpay_payment_id}")
+        
+        # Get order
+        order = db.query(Order).filter(
+            Order.id == request.order_id,
+            Order.user_id == current_user.id
+        ).first()
+        
+        if not order:
+            print(f"❌ Order not found: {request.order_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Order not found"
+            )
+        
+        print(f"✅ Order found: {order.order_number}")
+        
+        # Get payment record
+        payment = db.query(Payment).filter(
+            Payment.order_id == order.id
+        ).order_by(Payment.created_at.desc()).first()
+        
+        if not payment:
+            print(f"❌ Payment record not found for order: {order.id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Payment record not found"
+            )
+        
+        print(f"✅ Payment record found: ID={payment.id}")
+        
+        # Verify payment signature
+        is_valid = razorpay_service.verify_payment_signature(
+            razorpay_order_id=request.razorpay_order_id,
+            razorpay_payment_id=request.razorpay_payment_id,
+            razorpay_signature=request.razorpay_signature
+        )
+        
+        if not is_valid:
+            # Signature verification failed
+            payment.payment_status = PaymentStatus.FAILED
+            payment.failure_reason = "Payment signature verification failed"
+            payment.retry_count += 1
+            payment.updated_at = datetime.now()
+            
+            order.payment_status = OrderPaymentStatus.FAILED
+            order.updated_at = datetime.now()
+            
+            db.commit()
+            
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid payment signature"
+            )
+        
+        # Fetch payment details from Razorpay
+        payment_details = razorpay_service.fetch_payment(request.razorpay_payment_id)
+        
+        if not payment_details["success"]:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to fetch payment details from Razorpay"
+            )
+        
+        # Update payment record
+        payment.payment_status = PaymentStatus.PAID
+        payment.gateway_payment_id = request.razorpay_payment_id
+        payment.gateway_signature = request.razorpay_signature
+        payment.transaction_reference = request.razorpay_payment_id
+        payment.payment_completed_at = datetime.now()
+        payment.updated_at = datetime.now()
+        
+        # Update order
+        order.payment_status = OrderPaymentStatus.PAID
+        order.status = OrderStatus.CONFIRMED
+        order.payment_reference = request.razorpay_payment_id
+        order.confirmed_at = datetime.now()
+        order.updated_at = datetime.now()
+        
+        # Clear cart items for this order (only after successful payment)
+        from app.models.user_cart import UserCart
+        from app.models.orders import OrderItem
+        
+        # Get order items
+        order_items = db.query(OrderItem).filter(
+            OrderItem.order_id == order.id
+        ).all()
+        
+        print(f"📦 Found {len(order_items)} order items to clear from cart")
+        
+        # Delete cart items that match the order items
+        for order_item in order_items:
+            cart_items_to_delete = db.query(UserCart).filter(
+                UserCart.user_id == current_user.id,
+                UserCart.menu_item_id == order_item.menu_item_id,
+                UserCart.restaurant_id == order.restaurant_id
+            ).all()
+            
+            for cart_item in cart_items_to_delete:
+                db.delete(cart_item)
+                print(f"🗑️  Deleted cart item: {cart_item.item_name}")
+        
+        print(f"✅ Cart cleared for user {current_user.id} after successful payment")
+        
+        db.commit()
+        db.refresh(order)
+        db.refresh(payment)
+        
+        return {
+            "success": True,
+            "message": "Payment verified successfully",
+            "order_id": order.id,
+            "order_number": order.order_number,
+            "payment_id": request.razorpay_payment_id,
+            "order_status": "confirmed",
+            "payment_status": "paid"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Verify Razorpay payment error: {e}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to verify payment"
         )

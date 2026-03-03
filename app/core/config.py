@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # OTP Configuration
     OTP_EXPIRE_MINUTES: int = 10
     RESET_TOKEN_EXPIRE_MINUTES: int = 30
+    
+    # Razorpay Configuration
+    RAZORPAY_KEY_ID: str = ""
+    RAZORPAY_KEY_SECRET: str = ""
+    PAYMENT_MODE: str = "mock"  # "mock" or "razorpay"
 
     class Config:
         env_file = ".env"
