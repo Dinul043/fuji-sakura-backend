@@ -56,3 +56,21 @@ async def websocket_user_updates(
             await websocket.send_json({"type": "heartbeat", "status": "connected"})
     except WebSocketDisconnect:
         manager.disconnect_user(websocket, user_id)
+
+@router.websocket("/ws/restaurant-dashboard/{restaurant_id}")
+async def websocket_restaurant_dashboard(
+    websocket: WebSocket,
+    restaurant_id: int
+):
+    """WebSocket endpoint for restaurant dashboard - receives new order notifications"""
+    await manager.connect_restaurant(websocket, restaurant_id)
+    try:
+        while True:
+            # Keep connection alive and listen for heartbeat
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text("pong")
+            else:
+                await websocket.send_json({"type": "heartbeat", "status": "connected"})
+    except WebSocketDisconnect:
+        manager.disconnect_restaurant(websocket, restaurant_id)

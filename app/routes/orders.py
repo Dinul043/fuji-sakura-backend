@@ -291,6 +291,57 @@ async def update_order_status(
                 detail="Invalid order status"
             )
         
+        # Handle cancellation with refund for online payments
+        if new_status == OrderStatus.CANCELLED:
+            # Check if payment was made online
+            if order.payment_method and order.payment_method.lower() == 'online':
+                # Get the payment record
+                from app.models.payment import Payment, PaymentStatus as PayStatus
+                payment = db.query(Payment).filter(
+                    Payment.order_id == order_id,
+                    Payment.payment_status == PayStatus.PAID
+                ).first()
+                
+                if payment and payment.gateway_payment_id:
+                    print(f"💰 Initiating refund for order {order.order_number}")
+                    print(f"   Payment ID: {payment.gateway_payment_id}")
+                    print(f"   Amount: ₹{order.total_amount}")
+                    
+                    # Initiate refund via Razorpay
+                    from app.services.razorpay_service import razorpay_service
+                    refund_result = razorpay_service.refund_payment(
+                        payment_id=payment.gateway_payment_id,
+                        amount=order.total_amount
+                    )
+                    
+                    if refund_result.get('success'):
+                        print(f"✅ Refund initiated successfully")
+                        print(f"   Refund ID: {refund_result['refund'].get('id')}")
+                        
+                        # Update payment status to refunded
+                        payment.payment_status = PayStatus.REFUNDED
+                        payment.failure_reason = "Order cancelled by restaurant - Refund initiated"
+                        
+                        # Update order payment status (use the Order model's PaymentStatus)
+                        order.payment_status = PaymentStatus.REFUNDED
+                    else:
+                        error_msg = refund_result.get('error', 'Unknown error')
+                        print(f"❌ Refund failed: {error_msg}")
+                        
+                        # Check if already refunded
+                        if 'already' in error_msg.lower() and 'refund' in error_msg.lower():
+                            print(f"ℹ️ Payment already refunded, updating status")
+                            payment.payment_status = PayStatus.REFUNDED
+                            order.payment_status = OrderPaymentStatus.REFUNDED
+                        else:
+                            # For other errors, just log but still cancel the order
+                            print(f"⚠️ Continuing with cancellation despite refund failure")
+                            payment.failure_reason = f"Refund failed: {error_msg}"
+                            # Don't change payment_status if refund fails
+                elif order.payment_status == PaymentStatus.REFUNDED:
+                    print(f"ℹ️ Order already has refunded status, skipping refund")
+        
+        # Update order status
         order.status = new_status
         
         # Update delivered_at if status is delivered
@@ -307,6 +358,25 @@ async def update_order_status(
             "status": new_status.value,
             "order": order.to_dict()
         })
+        
+        return {
+            "success": True,
+            "message": "Order status updated successfully",
+            "order": order.to_dict(),
+            "refund_initiated": new_status == OrderStatus.CANCELLED and order.payment_method and order.payment_method.lower() == 'online'
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error updating order status: {str(e)}")
+        import traceback
+        print(f"❌ Traceback: {traceback.format_exc()}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update order status: {str(e)}"
+        )
         
         return {
             "message": "Order status updated successfully",

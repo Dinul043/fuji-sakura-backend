@@ -15,6 +15,8 @@ class ConnectionManager:
         self.order_connections: Dict[int, Set[WebSocket]] = {}
         # Store connections for restaurant updates
         self.restaurant_watchers: Dict[int, Set[WebSocket]] = {}
+        # Store connections for restaurant dashboards (for new order notifications)
+        self.restaurant_connections: Dict[int, Set[WebSocket]] = {}
 
     async def connect_user(self, websocket: WebSocket, user_id: int):
         """Connect a user for general updates"""
@@ -99,6 +101,47 @@ class ConnectionManager:
             # Clean up disconnected connections
             for connection in disconnected:
                 self.restaurant_watchers[restaurant_id].discard(connection)
+    
+    async def connect_restaurant(self, websocket: WebSocket, restaurant_id: int):
+        """Connect restaurant dashboard for new order notifications"""
+        await websocket.accept()
+        if restaurant_id not in self.restaurant_connections:
+            self.restaurant_connections[restaurant_id] = set()
+        self.restaurant_connections[restaurant_id].add(websocket)
+        print(f"✅ Restaurant {restaurant_id} connected for notifications")
+    
+    def disconnect_restaurant(self, websocket: WebSocket, restaurant_id: int):
+        """Disconnect restaurant dashboard"""
+        if restaurant_id in self.restaurant_connections:
+            self.restaurant_connections[restaurant_id].discard(websocket)
+            if not self.restaurant_connections[restaurant_id]:
+                del self.restaurant_connections[restaurant_id]
+            print(f"🔌 Restaurant {restaurant_id} disconnected")
+    
+    async def send_restaurant_notification(self, restaurant_id: int, notification_data: dict):
+        """
+        Send new order notification to specific restaurant dashboard
+        """
+        if restaurant_id in self.restaurant_connections:
+            disconnected = set()
+            message = {
+                "event": "new_order",
+                "data": notification_data
+            }
+            
+            for connection in self.restaurant_connections[restaurant_id]:
+                try:
+                    await connection.send_json(message)
+                    print(f"📤 Sent new order notification to restaurant {restaurant_id}")
+                except Exception as e:
+                    print(f"❌ Failed to send notification: {e}")
+                    disconnected.add(connection)
+            
+            # Clean up disconnected connections
+            for connection in disconnected:
+                self.restaurant_connections[restaurant_id].discard(connection)
+        else:
+            print(f"⚠️ No active connections for restaurant {restaurant_id}")
 
 # Global instance
 manager = ConnectionManager()

@@ -333,6 +333,97 @@ async def get_restaurant_profile(authorization: str = Header(None), db: Session 
             detail="Failed to fetch restaurant profile"
         )
 
+@router.get("/stats")
+async def get_restaurant_stats(authorization: str = Header(None), db: Session = Depends(get_db)):
+    """Get restaurant dashboard statistics"""
+    try:
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing or invalid authorization header"
+            )
+        
+        token = authorization.split(" ")[1]
+        
+        from app.utils.security import verify_token
+        from app.models.orders import Order, OrderStatus
+        from datetime import date
+        
+        payload = verify_token(token)
+        if not payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token"
+            )
+        
+        restaurant_email = payload.get("sub")
+        if not restaurant_email:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload"
+            )
+        
+        # Get restaurant
+        restaurant_app = db.query(RestaurantApplication).filter(
+            RestaurantApplication.email == restaurant_email,
+            RestaurantApplication.status == 1
+        ).first()
+        
+        if not restaurant_app:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Restaurant not found"
+            )
+        
+        restaurant_id = restaurant_app.id
+        today = date.today()
+        
+        # Get all orders for this restaurant (excluding pending/cancelled)
+        all_orders = db.query(Order).filter(
+            Order.restaurant_id == restaurant_id,
+            Order.status != OrderStatus.PENDING,
+            Order.status != OrderStatus.CANCELLED
+        ).all()
+        
+        # Get today's orders
+        today_orders = db.query(Order).filter(
+            Order.restaurant_id == restaurant_id,
+            func.date(Order.created_at) == today,
+            Order.status != OrderStatus.PENDING,
+            Order.status != OrderStatus.CANCELLED
+        ).all()
+        
+        # Calculate stats
+        total_orders = len(all_orders)
+        today_orders_count = len(today_orders)
+        total_revenue = sum(order.total_amount for order in all_orders)
+        today_revenue = sum(order.total_amount for order in today_orders)
+        
+        # Get menu items count
+        menu_items_count = db.query(RestaurantMenu).filter(
+            RestaurantMenu.restaurant_id == restaurant_id
+        ).count()
+        
+        return {
+            "totalOrders": total_orders,
+            "todayOrders": today_orders_count,
+            "totalRevenue": round(total_revenue, 2),
+            "todayRevenue": round(today_revenue, 2),
+            "menuItems": menu_items_count,
+            "avgRating": 4.3  # Hardcoded for now since reviews aren't implemented
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Get restaurant stats error: {e}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch restaurant stats"
+        )
+
 @router.put("/profile")
 async def update_restaurant_profile(
     profile_data: dict,

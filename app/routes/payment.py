@@ -629,6 +629,39 @@ async def verify_razorpay_payment(
         db.refresh(order)
         db.refresh(payment)
         
+        # Send real-time notification to restaurant
+        from app.utils.websocket_manager import manager
+        try:
+            await manager.send_restaurant_notification(
+                restaurant_id=order.restaurant_id,
+                notification_data={
+                    "type": "new_order",
+                    "order_id": order.id,
+                    "order_number": order.order_number,
+                    "customer_name": order.customer_name,
+                    "customer_phone": order.delivery_phone,
+                    "delivery_address": order.delivery_address,
+                    "total_amount": float(order.total_amount),
+                    "payment_method": order.payment_method,
+                    "items_count": len(order_items),
+                    "items": [
+                        {
+                            "name": item.item_name,
+                            "quantity": item.quantity,
+                            "price": float(item.item_price),
+                            "is_veg": item.is_veg
+                        }
+                        for item in order_items
+                    ],
+                    "timestamp": datetime.now().isoformat(),
+                    "status": "confirmed"
+                }
+            )
+            print(f"✅ Real-time notification sent to restaurant {order.restaurant_id}")
+        except Exception as e:
+            print(f"⚠️ Failed to send real-time notification: {e}")
+            # Don't fail the payment if notification fails
+        
         return {
             "success": True,
             "message": "Payment verified successfully",
