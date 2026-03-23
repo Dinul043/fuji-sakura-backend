@@ -73,44 +73,26 @@ class RazorpayService:
         razorpay_payment_id: str,
         razorpay_signature: str
     ) -> bool:
-        """
-        Verify payment signature for security
-        This ensures the payment callback is genuine from Razorpay
-        
-        Args:
-            razorpay_order_id: Razorpay order ID
-            razorpay_payment_id: Razorpay payment ID
-            razorpay_signature: Signature from Razorpay
-            
-        Returns:
-            bool: True if signature is valid, False otherwise
-        """
+        """Verify payment signature for security"""
         try:
             print(f"🔐 Verifying payment signature:")
             print(f"   Order ID: {razorpay_order_id}")
             print(f"   Payment ID: {razorpay_payment_id}")
-            print(f"   Signature: {razorpay_signature[:20]}...")
             
-            # Create signature string
             message = f"{razorpay_order_id}|{razorpay_payment_id}"
             
-            # Generate expected signature
             expected_signature = hmac.new(
                 settings.RAZORPAY_KEY_SECRET.encode(),
                 message.encode(),
                 hashlib.sha256
             ).hexdigest()
             
-            print(f"   Expected: {expected_signature[:20]}...")
-            
-            # Compare signatures
             is_valid = hmac.compare_digest(expected_signature, razorpay_signature)
             
             if is_valid:
-                print(f"✅ Signature verification successful!")
+                print(f"✅ Signature verification successfull!")
             else:
                 print(f"❌ Signature verification failed!")
-                print(f"   Message: {message}")
             
             return is_valid
         except Exception as e:
@@ -118,18 +100,6 @@ class RazorpayService:
             import traceback
             print(f"❌ Traceback: {traceback.format_exc()}")
             return False
-            
-            # Generate expected signature
-            expected_signature = hmac.new(
-                settings.RAZORPAY_KEY_SECRET.encode(),
-                message.encode(),
-                hashlib.sha256
-            ).hexdigest()
-            
-            # Compare signatures
-            return hmac.compare_digest(expected_signature, razorpay_signature)
-        except Exception as e:
-            print(f"Signature verification error: {e}")
             return False
     
     def fetch_payment(self, payment_id: str):
@@ -183,3 +153,4 @@ class RazorpayService:
 
 # Create singleton instance
 razorpay_service = RazorpayService()
+
