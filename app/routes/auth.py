@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.models.user import User
 from app.models.user_token import UserToken
 from app.utils.security import verify_password, get_password_hash, create_access_token
+from app.utils.security import get_current_user as get_current_user_from_auth
 from app.utils.email import send_otp_email, send_password_reset_email
 from app.utils.otp import generate_otp, generate_reset_token, is_otp_expired, get_otp_expiry, get_reset_token_expiry
 
@@ -718,3 +719,72 @@ def update_user_details(user_data: UpdateUserDetails, db: Session = Depends(get_
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error during user details update"
         )
+
+class UpdateProfileRequest(BaseModel):
+    name: str
+    phone: str | None = None
+    address: str | None = None
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+@router.get("/me")
+def get_profile(
+    current_user: User = Depends(get_current_user_from_auth),
+    db: Session = Depends(get_db)
+):
+    """Get current user profile"""
+    return {
+        "id": current_user.id,
+        "name": current_user.name,
+        "email": current_user.email,
+        "phone": current_user.phone,
+        "address": current_user.address,
+        "is_verified": current_user.is_verified,
+        "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+        "last_login": current_user.last_login.isoformat() if current_user.last_login else None,
+    }
+
+@router.put("/me")
+def update_profile(
+    data: UpdateProfileRequest,
+    current_user: User = Depends(get_current_user_from_auth),
+    db: Session = Depends(get_db)
+):
+    """Update user name, phone, address"""
+    current_user.name = data.name.strip()
+    if data.phone is not None:
+        current_user.phone = data.phone.strip() or None
+    if data.address is not None:
+        current_user.address = data.address.strip() or None
+    current_user.updated_at = datetime.now()
+    db.commit()
+    return {
+        "message": "Profile updated successfully",
+        "name": current_user.name,
+        "phone": current_user.phone,
+        "address": current_user.address,
+    }
+
+@router.put("/me/change-password")
+def change_password(
+    data: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user_from_auth),
+    db: Session = Depends(get_db)
+):
+    """Change user password"""
+    if not verify_password(data.current_password.strip(), current_user.password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+
+    is_valid, error_msg = validate_password(data.new_password.strip())
+    if not is_valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+
+    if verify_password(data.new_password.strip(), current_user.password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password cannot be the same as current password")
+
+    current_user.password = get_password_hash(data.new_password.strip())
+    current_user.updated_at = datetime.now()
+    db.commit()
+    return {"message": "Password changed successfully"}
