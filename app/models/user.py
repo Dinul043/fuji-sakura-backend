@@ -21,6 +21,7 @@ class User(Base):
     password = Column(String(255), nullable=False)  # Hashed password
     phone = Column(String(20), nullable=True)
     address = Column(String(500), nullable=True)
+    profile_image = Column(String(500), nullable=True)  # stores /uploads/profile_images/user_{id}_{uuid}.ext
     
     # Account status
     is_verified = Column(Boolean, default=False, nullable=False)

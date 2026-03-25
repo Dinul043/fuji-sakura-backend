@@ -5,7 +5,9 @@ Authentication routes for user registration, login, and OTP verification
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+import uuid, os
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
 
@@ -741,6 +743,7 @@ def get_profile(
         "email": current_user.email,
         "phone": current_user.phone,
         "address": current_user.address,
+        "profile_image": current_user.profile_image,
         "is_verified": current_user.is_verified,
         "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
         "last_login": current_user.last_login.isoformat() if current_user.last_login else None,
@@ -788,3 +791,39 @@ def change_password(
     current_user.updated_at = datetime.now()
     db.commit()
     return {"message": "Password changed successfully"}
+
+@router.post("/me/upload-image")
+async def upload_profile_image(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user_from_auth),
+    db: Session = Depends(get_db)
+):
+    """Upload user profile image - same pattern as restaurant/menu images"""
+    allowed_types = ["image/jpeg", "image/png", "image/jpg", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, and WebP images are allowed")
+
+    # Delete old image file from disk if exists
+    if current_user.profile_image:
+        old_path = current_user.profile_image.lstrip("/")
+        if os.path.exists(old_path):
+            os.remove(old_path)
+
+    # Save new image - same naming pattern as menu/restaurant
+    file_extension = file.filename.split('.')[-1] if '.' in file.filename else 'jpg'
+    unique_filename = f"user_{current_user.id}_{uuid.uuid4().hex}.{file_extension}"
+    upload_dir = Path("uploads/profile_images")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    file_path = upload_dir / unique_filename
+
+    file_content = await file.read()
+    with open(file_path, "wb") as f:
+        f.write(file_content)
+
+    # Store relative URL in DB - same as image_url in menu/restaurant
+    image_url = f"/uploads/profile_images/{unique_filename}"
+    current_user.profile_image = image_url
+    current_user.updated_at = datetime.now()
+    db.commit()
+
+    return {"profile_image": image_url}
