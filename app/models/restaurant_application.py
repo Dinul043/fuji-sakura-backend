@@ -189,7 +189,7 @@ class RestaurantApplication(Base):
         if self.session_expires_at <= current_time:
             return False
 
-        # Check inactivity (5 minutes)
+        # Check inactivity (5 minutes) — only if last_seen is populated
         if self.last_seen:
             inactivity_limit = current_time - timedelta(minutes=5)
             if self.last_seen < inactivity_limit:
@@ -216,10 +216,8 @@ class RestaurantApplication(Base):
             if self.last_seen < inactivity_limit:
                 return False  # Inactive for >5 mins → treat as expired
 
-        # If last_seen is NULL (old sessions before this feature), allow login
-        if self.last_seen is None:
-            return False
-
+        # last_seen is NULL → session just started or pre-dates this feature
+        # Treat as active if token is not expired (safe default)
         return True
 
     def force_clear_expired_sessions(self, db: Session):
