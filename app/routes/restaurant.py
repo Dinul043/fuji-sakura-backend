@@ -407,7 +407,10 @@ async def get_restaurant_stats(authorization: str = Header(None), db: Session = 
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Restaurant not found"
             )
-        
+
+        # Update last_seen so reopening dashboard refreshes the session
+        restaurant_app.update_last_seen(db)
+
         restaurant_id = restaurant_app.id
         today = date.today()
         
@@ -436,14 +439,25 @@ async def get_restaurant_stats(authorization: str = Header(None), db: Session = 
         menu_items_count = db.query(RestaurantMenu).filter(
             RestaurantMenu.restaurant_id == restaurant_id
         ).count()
-        
+
+        # Get real average rating from reviews
+        from app.models.review import Review
+        from sqlalchemy import func as sqlfunc
+        review_stats = db.query(
+            sqlfunc.avg(Review.rating).label('avg'),
+            sqlfunc.count(Review.id).label('count')
+        ).filter(Review.restaurant_id == restaurant_id).first()
+        avg_rating = round(float(review_stats.avg), 1) if review_stats.avg else 0.0
+        review_count = review_stats.count or 0
+
         return {
             "totalOrders": total_orders,
             "todayOrders": today_orders_count,
             "totalRevenue": round(total_revenue, 2),
             "todayRevenue": round(today_revenue, 2),
             "menuItems": menu_items_count,
-            "avgRating": 4.3  # Hardcoded for now since reviews aren't implemented
+            "avgRating": avg_rating,
+            "reviewCount": review_count
         }
         
     except HTTPException:
@@ -789,6 +803,7 @@ async def get_public_restaurants(db: Session = Depends(get_db)):
         ).all()
         
         restaurants_data = []
+        from app.models.review import Review
         for restaurant in approved_restaurants:
             # Get menu items count for this restaurant
             menu_count = db.query(RestaurantMenu).filter(
@@ -802,7 +817,15 @@ async def get_public_restaurants(db: Session = Depends(get_db)):
                 RestaurantMenu.is_available == True
             ).scalar()
             avg_price = round(avg_price_result, 2) if avg_price_result else 0
-            
+
+            # Real rating from reviews
+            review_stats = db.query(
+                func.avg(Review.rating).label('avg'),
+                func.count(Review.id).label('count')
+            ).filter(Review.restaurant_id == restaurant.id).first()
+            real_rating = round(float(review_stats.avg), 1) if review_stats.avg else 0.0
+            real_review_count = review_stats.count or 0
+
             restaurant_data = {
                 "id": restaurant.id,
                 "name": restaurant.business_name,
@@ -812,17 +835,16 @@ async def get_public_restaurants(db: Session = Depends(get_db)):
                 "address": restaurant.address,
                 "phone": restaurant.phone,
                 "email": restaurant.email,
-                "restaurant_image": restaurant.restaurant_image,  # Include restaurant image
-                "is_online": restaurant.is_online,  # Restaurant online/offline status
+                "restaurant_image": restaurant.restaurant_image,
+                "is_online": restaurant.is_online,
                 "menu_items_count": menu_count,
                 "average_price": avg_price,
                 "created_at": restaurant.created_at.isoformat() if restaurant.created_at else None,
-                # Mock data for now - can be enhanced later
-                "rating": round(4.0 + (restaurant.id % 10) * 0.1, 1),  # 4.0-4.9 rating
                 "delivery_time": f"{20 + (restaurant.id % 20)}-{30 + (restaurant.id % 20)} min",
-                "delivery_fee": round(2.0 + (restaurant.id % 5) * 0.5, 1),  # $2.0-$4.5
-                "reviews": 50 + (restaurant.id % 200),  # 50-250 reviews
-                "image": "🍽️",  # Default emoji, can be enhanced with real images
+                "delivery_fee": round(2.0 + (restaurant.id % 5) * 0.5, 1),
+                "rating": real_rating,
+                "reviews": real_review_count,
+                "image": "🍽️",
                 "tags": [restaurant.cuisine_type, "Popular", "Fast Delivery"],
                 "category": restaurant.cuisine_type
             }
@@ -880,6 +902,15 @@ async def get_public_restaurant_details(restaurant_id: int, db: Session = Depend
         # Calculate restaurant stats
         total_items = len(menu_items)
         avg_price = round(sum(item.price for item in menu_items) / total_items, 2) if total_items > 0 else 0
+
+        # Real rating from reviews
+        from app.models.review import Review
+        r_stats = db.query(
+            func.avg(Review.rating).label('avg'),
+            func.count(Review.id).label('count')
+        ).filter(Review.restaurant_id == restaurant_id).first()
+        real_rating = round(float(r_stats.avg), 1) if r_stats.avg else 0.0
+        real_review_count = r_stats.count or 0
         
         restaurant_details = {
             "id": restaurant.id,
@@ -892,11 +923,10 @@ async def get_public_restaurant_details(restaurant_id: int, db: Session = Depend
             "menu_by_category": menu_by_category,
             "total_menu_items": total_items,
             "average_price": avg_price,
-            # Mock data for now
-            "rating": round(4.0 + (restaurant.id % 10) * 0.1, 1),
+            "rating": real_rating,
             "delivery_time": f"{20 + (restaurant.id % 20)}-{30 + (restaurant.id % 20)} min",
             "delivery_fee": round(2.0 + (restaurant.id % 5) * 0.5, 1),
-            "reviews": 50 + (restaurant.id % 200),
+            "reviews": real_review_count,
             "image": "🍽️",
             "tags": [restaurant.cuisine_type, "Popular", "Fast Delivery"],
             "hours": "9:00 AM - 11:00 PM",
