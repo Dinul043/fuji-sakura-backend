@@ -17,6 +17,36 @@ from app.utils.websocket_manager import manager
 
 router = APIRouter()
 
+# ── Shared restaurant auth dependency ──────────────────────────────────────
+def get_authenticated_restaurant(authorization: str, db: Session) -> RestaurantApplication:
+    """Verify restaurant token, update last_seen, and return the restaurant object."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid authorization header")
+    token = authorization.split(" ")[1]
+    from app.utils.security import verify_token
+    payload = verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+    restaurant_email = payload.get("sub")
+    if not restaurant_email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+    restaurant = db.query(RestaurantApplication).filter(
+        RestaurantApplication.email == restaurant_email,
+        RestaurantApplication.status == ApplicationStatus.APPROVED
+    ).first()
+    if not restaurant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Restaurant not found or not approved")
+    # Update last_seen on every authenticated call
+    restaurant.update_last_seen(db)
+    return restaurant
+# ───────────────────────────────────────────────────────────────────────────
+
+@router.post("/heartbeat")
+async def restaurant_heartbeat(authorization: str = Header(None), db: Session = Depends(get_db)):
+    """Lightweight ping called every 60s from frontend to keep last_seen fresh."""
+    restaurant = get_authenticated_restaurant(authorization, db)
+    return {"status": "ok", "last_seen": restaurant.last_seen.isoformat()}
+
 class RestaurantApplicationRequest(BaseModel):
     businessName: str
     ownerName: str
@@ -304,6 +334,9 @@ async def get_restaurant_profile(authorization: str = Header(None), db: Session 
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Session expired or invalid. Please login again."
             )
+
+        # Update last_seen on every profile fetch (keeps session alive)
+        restaurant_app.update_last_seen(db)
         
         # Return restaurant profile data
         return {
@@ -647,8 +680,7 @@ async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Dep
                 detail="Account access denied. Please contact support."
             )
         
-        # Check if restaurant already has an active session
-        # First, clear any expired sessions
+        # Clear expired sessions and sessions inactive for >5 minutes
         application.force_clear_expired_sessions(db)
         
         # Also clear any sessions that are older than 8 hours (safety cleanup)

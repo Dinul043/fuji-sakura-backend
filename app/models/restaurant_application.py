@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, SmallInteger, Boolean
 from sqlalchemy.orm import Session
@@ -61,6 +61,7 @@ class RestaurantApplication(Base):
     active_session_token = Column(String(255), nullable=True, index=True)
     last_login = Column(DateTime, nullable=True)
     session_expires_at = Column(DateTime, nullable=True)
+    last_seen = Column(DateTime, nullable=True)  # Updated on every authenticated request
     reviewed_by = Column(Integer, ForeignKey("admins.id", ondelete="SET NULL"), nullable=True)
 
     @classmethod
@@ -154,10 +155,16 @@ class RestaurantApplication(Base):
             'reviewed_by': self.reviewed_by
         }
 
+    def update_last_seen(self, db: Session):
+        """Update last_seen timestamp — called on every authenticated request"""
+        self.last_seen = datetime.now()
+        db.commit()
+
     def set_active_session(self, db: Session, session_token: str, expires_at: datetime):
         """Set active session for restaurant"""
         self.active_session_token = session_token
         self.last_login = datetime.now()
+        self.last_seen = datetime.now()
         self.session_expires_at = expires_at
         self.updated_at = datetime.now()
         db.commit()
@@ -170,22 +177,50 @@ class RestaurantApplication(Base):
         db.commit()
 
     def is_session_active(self, session_token: str) -> bool:
-        """Check if session is active and valid"""
+        """Check if a specific session token is active and not timed out by inactivity."""
         if not self.active_session_token or not self.session_expires_at:
             return False
-        
-        # Check if token matches and not expired
+
         current_time = datetime.now()
-        return (self.active_session_token == session_token and 
-                self.session_expires_at > current_time)
+
+        # Token must match and not be expired
+        if self.active_session_token != session_token:
+            return False
+        if self.session_expires_at <= current_time:
+            return False
+
+        # Check inactivity (5 minutes)
+        if self.last_seen:
+            inactivity_limit = current_time - timedelta(minutes=5)
+            if self.last_seen < inactivity_limit:
+                return False
+
+        return True
 
     def has_active_session(self) -> bool:
-        """Check if restaurant has any active session that hasn't expired"""
+        """Check if restaurant has any active session that hasn't expired.
+        Session is considered active only if last_seen is within the last 5 minutes.
+        If last_seen is older than 5 minutes, treat as expired regardless of token expiry."""
         if not self.active_session_token or not self.session_expires_at:
             return False
-        
+
         current_time = datetime.now()
-        return self.session_expires_at > current_time
+
+        # Token must not be expired
+        if self.session_expires_at <= current_time:
+            return False
+
+        # If last_seen exists, check inactivity window (5 minutes)
+        if self.last_seen:
+            inactivity_limit = current_time - timedelta(minutes=5)
+            if self.last_seen < inactivity_limit:
+                return False  # Inactive for >5 mins → treat as expired
+
+        # If last_seen is NULL (old sessions before this feature), allow login
+        if self.last_seen is None:
+            return False
+
+        return True
 
     def force_clear_expired_sessions(self, db: Session):
         """Force clear expired sessions"""
