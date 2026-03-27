@@ -328,13 +328,6 @@ async def get_restaurant_profile(authorization: str = Header(None), db: Session 
                 detail="Restaurant profile not found or not approved"
             )
         
-        # Validate session is still active
-        if not restaurant_app.is_session_active(token):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Session expired or invalid. Please login again."
-            )
-
         # Update last_seen on every profile fetch (keeps session alive)
         restaurant_app.update_last_seen(db)
         
@@ -694,30 +687,7 @@ async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Dep
                 detail="Account access denied. Please contact support."
             )
         
-        # Clear expired sessions and sessions inactive for >5 minutes
-        application.force_clear_expired_sessions(db)
-        
-        # Also clear any sessions that are older than 8 hours (safety cleanup)
-        current_time = datetime.now()
-        cleanup_time = current_time - timedelta(hours=8)
-        
-        # Clear old sessions for all restaurants (cleanup)
-        db.execute(text("""
-            UPDATE restaurant_applications 
-            SET active_session_token = NULL, session_expires_at = NULL 
-            WHERE session_expires_at < :cleanup_time OR (session_expires_at IS NULL AND active_session_token IS NOT NULL)
-        """), {"cleanup_time": cleanup_time})
-        db.commit()
-        
-        # Refresh the application object after cleanup
-        db.refresh(application)
-        
-        # Check if restaurant already has an active session
-        if application.has_active_session():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Already user is using, wait until logout"
-            )
+        # No session restriction - multiple admins can login simultaneously
         
         # Create access token with 8-hour expiry
         expires_delta = timedelta(hours=8)

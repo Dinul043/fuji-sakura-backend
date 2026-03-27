@@ -189,9 +189,9 @@ class RestaurantApplication(Base):
         if self.session_expires_at <= current_time:
             return False
 
-        # Check inactivity (5 minutes) — only if last_seen is populated
+        # Check inactivity (15 minutes) — only if last_seen is populated
         if self.last_seen:
-            inactivity_limit = current_time - timedelta(minutes=5)
+            inactivity_limit = current_time - timedelta(minutes=15)
             if self.last_seen < inactivity_limit:
                 return False
 
@@ -199,8 +199,8 @@ class RestaurantApplication(Base):
 
     def has_active_session(self) -> bool:
         """Check if restaurant has any active session that hasn't expired.
-        Session is considered active only if last_seen is within the last 5 minutes.
-        If last_seen is older than 5 minutes, treat as expired regardless of token expiry."""
+        Session is considered active only if last_seen is within the last 15 minutes.
+        If last_seen is older than 15 minutes, treat as expired regardless of token expiry."""
         if not self.active_session_token or not self.session_expires_at:
             return False
 
@@ -210,11 +210,11 @@ class RestaurantApplication(Base):
         if self.session_expires_at <= current_time:
             return False
 
-        # If last_seen exists, check inactivity window (5 minutes)
+        # If last_seen exists, check inactivity window (15 minutes)
         if self.last_seen:
-            inactivity_limit = current_time - timedelta(minutes=5)
+            inactivity_limit = current_time - timedelta(minutes=15)
             if self.last_seen < inactivity_limit:
-                return False  # Inactive for >5 mins → treat as expired
+                return False  # Inactive for >15 mins → treat as expired
 
         # last_seen is NULL → session just started or pre-dates this feature
         # Treat as active if token is not expired (safe default)
