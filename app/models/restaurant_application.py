@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, SmallInteger, Boolean
 from sqlalchemy.orm import Session
@@ -56,12 +56,7 @@ class RestaurantApplication(Base):
     created_at = Column(DateTime, default=datetime.now, index=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     reviewed_at = Column(DateTime, nullable=True)
-    
-    # Session Management
-    active_session_token = Column(String(255), nullable=True, index=True)
     last_login = Column(DateTime, nullable=True)
-    session_expires_at = Column(DateTime, nullable=True)
-    last_seen = Column(DateTime, nullable=True)  # Updated on every authenticated request
     reviewed_by = Column(Integer, ForeignKey("admins.id", ondelete="SET NULL"), nullable=True)
 
     @classmethod
@@ -154,77 +149,3 @@ class RestaurantApplication(Base):
             'reviewed_at': self.reviewed_at.isoformat() if self.reviewed_at else None,
             'reviewed_by': self.reviewed_by
         }
-
-    def update_last_seen(self, db: Session):
-        """Update last_seen timestamp — called on every authenticated request"""
-        self.last_seen = datetime.now()
-        db.commit()
-
-    def set_active_session(self, db: Session, session_token: str, expires_at: datetime):
-        """Set active session for restaurant"""
-        self.active_session_token = session_token
-        self.last_login = datetime.now()
-        self.last_seen = datetime.now()
-        self.session_expires_at = expires_at
-        self.updated_at = datetime.now()
-        db.commit()
-
-    def clear_session(self, db: Session):
-        """Clear active session"""
-        self.active_session_token = None
-        self.session_expires_at = None
-        self.updated_at = datetime.now()
-        db.commit()
-
-    def is_session_active(self, session_token: str) -> bool:
-        """Check if a specific session token is active and not timed out by inactivity."""
-        if not self.active_session_token or not self.session_expires_at:
-            return False
-
-        current_time = datetime.now()
-
-        # Token must match and not be expired
-        if self.active_session_token != session_token:
-            return False
-        if self.session_expires_at <= current_time:
-            return False
-
-        # Check inactivity (15 minutes) — only if last_seen is populated
-        if self.last_seen:
-            inactivity_limit = current_time - timedelta(minutes=15)
-            if self.last_seen < inactivity_limit:
-                return False
-
-        return True
-
-    def has_active_session(self) -> bool:
-        """Check if restaurant has any active session that hasn't expired.
-        Session is considered active only if last_seen is within the last 15 minutes.
-        If last_seen is older than 15 minutes, treat as expired regardless of token expiry."""
-        if not self.active_session_token or not self.session_expires_at:
-            return False
-
-        current_time = datetime.now()
-
-        # Token must not be expired
-        if self.session_expires_at <= current_time:
-            return False
-
-        # If last_seen exists, check inactivity window (15 minutes)
-        if self.last_seen:
-            inactivity_limit = current_time - timedelta(minutes=15)
-            if self.last_seen < inactivity_limit:
-                return False  # Inactive for >15 mins → treat as expired
-
-        # last_seen is NULL → session just started or pre-dates this feature
-        # Treat as active if token is not expired (safe default)
-        return True
-
-    def force_clear_expired_sessions(self, db: Session):
-        """Force clear expired sessions"""
-        current_time = datetime.now()
-        if self.session_expires_at and self.session_expires_at <= current_time:
-            self.active_session_token = None
-            self.session_expires_at = None
-            self.updated_at = current_time
-            db.commit()

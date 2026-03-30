@@ -19,7 +19,7 @@ router = APIRouter()
 
 # ── Shared restaurant auth dependency ──────────────────────────────────────
 def get_authenticated_restaurant(authorization: str, db: Session) -> RestaurantApplication:
-    """Verify restaurant token, update last_seen, and return the restaurant object."""
+    """Verify restaurant token and return the restaurant object."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid authorization header")
     token = authorization.split(" ")[1]
@@ -36,16 +36,8 @@ def get_authenticated_restaurant(authorization: str, db: Session) -> RestaurantA
     ).first()
     if not restaurant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Restaurant not found or not approved")
-    # Update last_seen on every authenticated call
-    restaurant.update_last_seen(db)
     return restaurant
 # ───────────────────────────────────────────────────────────────────────────
-
-@router.post("/heartbeat")
-async def restaurant_heartbeat(authorization: str = Header(None), db: Session = Depends(get_db)):
-    """Lightweight ping called every 60s from frontend to keep last_seen fresh."""
-    restaurant = get_authenticated_restaurant(authorization, db)
-    return {"status": "ok", "last_seen": restaurant.last_seen.isoformat()}
 
 class RestaurantApplicationRequest(BaseModel):
     businessName: str
@@ -328,9 +320,6 @@ async def get_restaurant_profile(authorization: str = Header(None), db: Session 
                 detail="Restaurant profile not found or not approved"
             )
         
-        # Update last_seen on every profile fetch (keeps session alive)
-        restaurant_app.update_last_seen(db)
-        
         # Return restaurant profile data
         return {
             "id": restaurant_app.id,
@@ -401,8 +390,9 @@ async def get_restaurant_stats(authorization: str = Header(None), db: Session = 
                 detail="Restaurant not found"
             )
 
-        # Update last_seen so reopening dashboard refreshes the session
-        restaurant_app.update_last_seen(db)
+        # Update last login time so reopening dashboard works
+        restaurant_app.last_login = datetime.now()
+        db.commit()
 
         restaurant_id = restaurant_app.id
         today = date.today()
@@ -593,8 +583,7 @@ async def restaurant_logout(authorization: str = Header(None), db: Session = Dep
         ).first()
         
         if restaurant_app:
-            # Clear the active session
-            restaurant_app.clear_session(db)
+            pass  # JWT expiry handles session end
         
         return {"message": "Logged out successfully"}
         
@@ -695,13 +684,11 @@ async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Dep
             data={"sub": application.email, "type": "restaurant", "restaurant_id": application.id},
             expires_delta=expires_delta
         )
-        
-        # Calculate session expiry time
-        session_expires_at = datetime.now() + expires_delta
-        
-        # Set active session in database
-        application.set_active_session(db, access_token, session_expires_at)
-        
+
+        # Update last login time
+        application.last_login = datetime.now()
+        db.commit()
+
         # Return login response
         return RestaurantLoginResponse(
             access_token=access_token,
