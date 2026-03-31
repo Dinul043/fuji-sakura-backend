@@ -100,11 +100,9 @@ async def create_order(
                 subtotal=subtotal,
                 delivery_fee=delivery_fee,
                 tax_amount=tax_amount,
-                discount_amount=0.0,
                 total_amount=total_amount,
                 delivery_address=delivery_address_text,
                 delivery_phone=addr.phone,
-                delivery_instructions=request.special_instructions,
                 customer_name=addr.fullName,
                 customer_email=current_user.email,
                 restaurant_name=restaurant.business_name,
@@ -171,6 +169,19 @@ async def create_order(
         # Refresh orders to get all relationships
         for order in created_orders:
             db.refresh(order)
+
+        # Notify each restaurant via WebSocket
+        for order in created_orders:
+            await manager.send_restaurant_notification(order.restaurant_id, {
+                "order_id": order.id,
+                "order_number": order.order_number,
+                "customer_name": order.customer_name,
+                "total_amount": order.total_amount,
+                "payment_method": order.payment_method,
+                "special_instructions": order.special_instructions,
+                "items": [item.to_dict() for item in order.order_items],
+                "created_at": order.created_at.isoformat() if order.created_at else None
+            })
         
         return {
             "message": "Order placed successfully",
