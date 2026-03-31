@@ -40,16 +40,14 @@ class Order(Base):
     payment_status = Column(Enum(PaymentStatus), default=PaymentStatus.PENDING, nullable=False)
     
     # Pricing
-    subtotal = Column(Float, nullable=False)  # Sum of all items
+    subtotal = Column(Float, nullable=False)
     delivery_fee = Column(Float, nullable=False, default=0.0)
     tax_amount = Column(Float, nullable=False, default=0.0)
-    discount_amount = Column(Float, nullable=False, default=0.0)
     total_amount = Column(Float, nullable=False)
     
     # Delivery information
     delivery_address = Column(Text, nullable=False)
     delivery_phone = Column(String(20), nullable=False)
-    delivery_instructions = Column(Text, nullable=True)
     
     # Customer information (cached)
     customer_name = Column(String(255), nullable=False)
@@ -60,7 +58,6 @@ class Order(Base):
     
     # Timing
     estimated_delivery_time = Column(Integer, nullable=True)  # Minutes
-    actual_delivery_time = Column(DateTime, nullable=True)
     
     # Payment information
     payment_method = Column(String(50), nullable=True)  # "card", "cash", "upi", etc.
@@ -94,11 +91,9 @@ class Order(Base):
             "subtotal": self.subtotal,
             "delivery_fee": self.delivery_fee,
             "tax_amount": self.tax_amount,
-            "discount_amount": self.discount_amount,
             "total_amount": self.total_amount,
             "delivery_address": self.delivery_address,
             "delivery_phone": self.delivery_phone,
-            "delivery_instructions": self.delivery_instructions,
             "customer_name": self.customer_name,
             "customer_email": self.customer_email,
             "restaurant_name": self.restaurant_name,

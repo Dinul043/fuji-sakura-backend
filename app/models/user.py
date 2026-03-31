@@ -31,7 +31,6 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     last_login = Column(DateTime, nullable=True)
-    deleted_at = Column(DateTime, nullable=True)  # Soft delete for future
     
     # Relationship with tokens (one-to-many)
     tokens = relationship("UserToken", back_populates="user", cascade="all, delete-orphan")
