@@ -523,3 +523,71 @@ async def reactivate_admin(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to reactivate admin. Please try again."
         )
+
+class AdminForgotPassword(BaseModel):
+    email: str
+
+class AdminResetPassword(BaseModel):
+    email: str
+    token: str
+    new_password: str
+
+@router.post("/forgot-password")
+async def admin_forgot_password(data: AdminForgotPassword, db: Session = Depends(get_db)):
+    """Send password reset code to admin email"""
+    from app.utils.otp import generate_reset_token, get_reset_token_expiry
+    from app.utils.email import send_password_reset_email
+    from app.models.admin_token import AdminToken
+
+    admin = db.query(Admin).filter(Admin.email == data.email.lower().strip()).first()
+    if not admin:
+        raise HTTPException(status_code=404, detail="No admin account found with this email address")
+
+    token = generate_reset_token()
+    expiry = get_reset_token_expiry()
+
+    # Upsert admin token record
+    admin_token = db.query(AdminToken).filter(AdminToken.admin_id == admin.id).first()
+    if admin_token:
+        admin_token.reset_token = token
+        admin_token.reset_token_expires_at = expiry
+    else:
+        admin_token = AdminToken(admin_id=admin.id, reset_token=token, reset_token_expires_at=expiry)
+        db.add(admin_token)
+    db.commit()
+
+    send_password_reset_email(admin.email, token, admin.name)
+    return {"message": "Reset code sent to your email"}
+
+
+@router.post("/reset-password")
+async def admin_reset_password(data: AdminResetPassword, db: Session = Depends(get_db)):
+    """Reset admin password using the reset code"""
+    from app.utils.otp import is_otp_expired
+    from app.utils.security import get_password_hash
+    from app.models.admin_token import AdminToken
+
+    admin = db.query(Admin).filter(Admin.email == data.email.lower().strip()).first()
+    if not admin:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset code")
+
+    admin_token = db.query(AdminToken).filter(AdminToken.admin_id == admin.id).first()
+    if not admin_token or not admin_token.reset_token:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset code")
+
+    if admin_token.reset_token != data.token:
+        raise HTTPException(status_code=400, detail="Invalid reset code")
+
+    if is_otp_expired(admin_token.reset_token_expires_at):
+        raise HTTPException(status_code=400, detail="Reset code has expired")
+
+    if len(data.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    admin.password = get_password_hash(data.new_password)
+    admin.updated_at = datetime.now()
+    admin_token.reset_token = None
+    admin_token.reset_token_expires_at = None
+    db.commit()
+
+    return {"message": "Password reset successfully"}

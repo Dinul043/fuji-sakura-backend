@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from app.core.config import settings
 from app.routes import auth, restaurant, admin_auth, menu, cart, orders, websocket, payment, reviews
+from app.models import admin_token  # Register AdminToken model with SQLAlchemy
 
 # Create FastAPI application
 app = FastAPI(

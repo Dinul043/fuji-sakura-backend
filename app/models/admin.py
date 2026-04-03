@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import Column, Integer, String, Boolean, DateTime
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, relationship
 from app.core.database import Base
 from app.utils.security import verify_password, get_password_hash
 
@@ -14,13 +14,16 @@ class Admin(Base):
     password = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     is_super_admin = Column(Boolean, default=False, nullable=False, index=True)
-    
+
     # Timestamps (UTC)
     created_at = Column(DateTime, default=lambda: datetime.now(), index=True)
-    updated_at = Column(DateTime, default=lambda: datetime.now(), 
+    updated_at = Column(DateTime, default=lambda: datetime.now(),
                        onupdate=lambda: datetime.now())
     last_login = Column(DateTime, nullable=True)
-    created_by = Column(Integer, nullable=True)  # ID of admin who created this admin
+    created_by = Column(Integer, nullable=True)
+
+    # Relationship
+    tokens = relationship("AdminToken", back_populates="admin", cascade="all, delete-orphan")  # ID of admin who created this admin
 
     @classmethod
     def create(cls, db: Session, email: str, name: str, password: str, 
