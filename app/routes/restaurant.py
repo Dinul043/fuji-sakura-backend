@@ -1263,3 +1263,147 @@ async def toggle_restaurant_online_status(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to toggle online status: {str(e)}"
         )
+
+
+# ── Restaurant Forgot / Reset Password ────────────────────────────────────
+
+class RestaurantForgotPasswordRequest(BaseModel):
+    email: str
+
+class RestaurantResetPasswordRequest(BaseModel):
+    email: str
+    token: str
+    new_password: str
+
+@router.post("/forgot-password")
+async def restaurant_forgot_password(
+    data: RestaurantForgotPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    """Send 4-digit reset token to restaurant email (expires in 10 minutes)"""
+    from app.models.restaurant_token import RestaurantToken
+    from app.utils.otp import generate_reset_token, is_otp_expired
+    from datetime import timedelta
+
+    restaurant = db.query(RestaurantApplication).filter(
+        RestaurantApplication.email == data.email.lower().strip(),
+        RestaurantApplication.status == ApplicationStatus.APPROVED
+    ).first()
+
+    # Check if email exists at all (any status)
+    if not restaurant:
+        any_application = db.query(RestaurantApplication).filter(
+            RestaurantApplication.email == data.email.lower().strip()
+        ).first()
+        if any_application:
+            if any_application.status == ApplicationStatus.PENDING:
+                raise HTTPException(status_code=403, detail="Your restaurant application is still under review. Password reset is not available yet.")
+            elif any_application.status == ApplicationStatus.REJECTED:
+                raise HTTPException(status_code=403, detail="Your restaurant application was not approved. Please contact support.")
+        raise HTTPException(status_code=404, detail="No approved restaurant account found with this email.")
+
+    # Generate 4-digit token, expires in 10 minutes
+    token = generate_reset_token()
+    expires_at = datetime.now() + timedelta(minutes=10)
+
+    # Upsert token record
+    existing = db.query(RestaurantToken).filter(
+        RestaurantToken.restaurant_id == restaurant.id
+    ).first()
+    if existing:
+        existing.reset_token = token
+        existing.reset_token_expires_at = expires_at
+    else:
+        new_token = RestaurantToken(
+            restaurant_id=restaurant.id,
+            reset_token=token,
+            reset_token_expires_at=expires_at
+        )
+        db.add(new_token)
+    db.commit()
+
+    # Send email
+    from app.utils.email import send_password_reset_email
+    send_password_reset_email(
+        to_email=restaurant.email,
+        reset_token=token,
+        user_name=restaurant.business_name
+    )
+
+    print(f"🔑 Restaurant reset token for {restaurant.email}: {token}")
+    return {"message": "If this email is registered, a reset code has been sent."}
+
+
+@router.post("/verify-reset-code")
+async def restaurant_verify_reset_code(
+    data: RestaurantResetPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    """Verify reset code only (without changing password)"""
+    from app.models.restaurant_token import RestaurantToken
+    from app.utils.otp import is_otp_expired
+
+    restaurant = db.query(RestaurantApplication).filter(
+        RestaurantApplication.email == data.email.lower().strip(),
+        RestaurantApplication.status == ApplicationStatus.APPROVED
+    ).first()
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+
+    token_record = db.query(RestaurantToken).filter(
+        RestaurantToken.restaurant_id == restaurant.id
+    ).first()
+    if not token_record or not token_record.reset_token:
+        raise HTTPException(status_code=400, detail="No reset code found. Please request a new one.")
+
+    if is_otp_expired(token_record.reset_token_expires_at):
+        db.delete(token_record)
+        db.commit()
+        raise HTTPException(status_code=400, detail="Reset code expired. Please request a new one.")
+
+    if token_record.reset_token != data.token:
+        raise HTTPException(status_code=400, detail="Invalid reset code.")
+
+    return {"message": "Reset code verified successfully"}
+
+
+@router.post("/reset-password")
+async def restaurant_reset_password(
+    data: RestaurantResetPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    """Reset restaurant password using verified token"""
+    from app.models.restaurant_token import RestaurantToken
+    from app.utils.otp import is_otp_expired
+
+    restaurant = db.query(RestaurantApplication).filter(
+        RestaurantApplication.email == data.email.lower().strip(),
+        RestaurantApplication.status == ApplicationStatus.APPROVED
+    ).first()
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+
+    token_record = db.query(RestaurantToken).filter(
+        RestaurantToken.restaurant_id == restaurant.id
+    ).first()
+    if not token_record or not token_record.reset_token:
+        raise HTTPException(status_code=400, detail="No reset code found. Please request a new one.")
+
+    if is_otp_expired(token_record.reset_token_expires_at):
+        db.delete(token_record)
+        db.commit()
+        raise HTTPException(status_code=400, detail="Reset code expired. Please request a new one.")
+
+    if token_record.reset_token != data.token:
+        raise HTTPException(status_code=400, detail="Invalid reset code.")
+
+    if len(data.new_password.strip()) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    # Update password and clear token
+    restaurant.password = get_password_hash(data.new_password.strip())
+    restaurant.updated_at = datetime.now()
+    db.delete(token_record)
+    db.commit()
+
+    return {"message": "Password reset successfully. You can now login with your new password."}
