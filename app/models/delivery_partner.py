@@ -3,7 +3,7 @@ Delivery Partner model
 Phase 1 completed: DB tables created (delivery_partners, delivery_tokens)
 """
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, TinyInteger, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 from datetime import datetime

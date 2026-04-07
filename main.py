@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from app.core.config import settings
-from app.routes import auth, restaurant, admin_auth, menu, cart, orders, websocket, payment, reviews
+from app.routes import auth, restaurant, admin_auth, menu, cart, orders, websocket, payment, reviews, delivery
 from app.models import admin_token  # Register AdminToken model with SQLAlchemy
 
 # Create FastAPI application
@@ -62,6 +62,9 @@ app.include_router(payment.router, prefix="/api/payments", tags=["Payment Proces
 
 # Include reviews routes
 app.include_router(reviews.router, prefix="/api/reviews", tags=["Reviews"])
+
+# Include delivery partner routes
+app.include_router(delivery.router, prefix="/api/delivery", tags=["Delivery Partners"])
 
 # Include WebSocket routes
 app.include_router(websocket.router, tags=["WebSocket"])

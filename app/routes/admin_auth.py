@@ -591,3 +591,104 @@ async def admin_reset_password(data: AdminResetPassword, db: Session = Depends(g
     db.commit()
 
     return {"message": "Password reset successfully"}
+
+
+# ── Delivery Partner Admin Endpoints ──────────────────────────────────────
+# Phase 3 completed: Admin can list, approve, reject delivery partner applications
+
+from app.models.delivery_partner import DeliveryPartner
+
+def get_admin_from_token(authorization: str, db: Session) -> Admin:
+    """Verify admin token and return admin object"""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+    token = authorization.split(" ")[1]
+    from app.utils.security import verify_token
+    payload = verify_token(token)
+    if not payload or not payload.get("is_admin"):
+        raise HTTPException(status_code=401, detail="Invalid or expired admin token")
+    admin = db.query(Admin).filter(Admin.id == payload.get("admin_id"), Admin.is_active == True).first()
+    if not admin:
+        raise HTTPException(status_code=401, detail="Admin not found or deactivated")
+    return admin
+
+
+@router.get("/delivery-partners")
+async def list_delivery_partners(
+    status_filter: str = "all",
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """List delivery partner applications — filter by all/pending/approved/rejected"""
+    get_admin_from_token(authorization, db)
+    status_map = {"pending": 0, "approved": 1, "rejected": 2}
+    query = db.query(DeliveryPartner)
+    if status_filter in status_map:
+        query = query.filter(DeliveryPartner.status == status_map[status_filter])
+    partners = query.order_by(DeliveryPartner.created_at.desc()).all()
+    return {"partners": [p.to_dict() for p in partners], "total": len(partners)}
+
+
+class DeliveryReviewRequest(BaseModel):
+    notes: str = ""
+
+
+@router.put("/delivery/approve/{partner_id}")
+async def approve_delivery_partner(
+    partner_id: int,
+    data: DeliveryReviewRequest,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Approve a delivery partner application and send approval email"""
+    admin = get_admin_from_token(authorization, db)
+    partner = db.query(DeliveryPartner).filter(DeliveryPartner.id == partner_id).first()
+    if not partner:
+        raise HTTPException(status_code=404, detail="Delivery partner not found")
+    if partner.status == 1:
+        raise HTTPException(status_code=400, detail="Already approved")
+
+    partner.status = 1
+    partner.admin_notes = data.notes.strip() or None
+    partner.reviewed_by = admin.id
+    partner.reviewed_at = datetime.now()
+    partner.updated_at = datetime.now()
+    db.commit()
+
+    # Send approval email
+    try:
+        from app.utils.email import send_restaurant_approval_email
+        send_restaurant_approval_email(
+            to_email=partner.email,
+            restaurant_name=partner.name,
+            owner_name=partner.name
+        )
+    except Exception as e:
+        print(f"⚠️ Failed to send approval email: {e}")
+
+    return {"message": f"Delivery partner '{partner.name}' approved successfully", "partner": partner.to_dict()}
+
+
+@router.put("/delivery/reject/{partner_id}")
+async def reject_delivery_partner(
+    partner_id: int,
+    data: DeliveryReviewRequest,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Reject a delivery partner application"""
+    admin = get_admin_from_token(authorization, db)
+    partner = db.query(DeliveryPartner).filter(DeliveryPartner.id == partner_id).first()
+    if not partner:
+        raise HTTPException(status_code=404, detail="Delivery partner not found")
+    if partner.status == 2:
+        raise HTTPException(status_code=400, detail="Already rejected")
+
+    partner.status = 2
+    partner.admin_notes = data.notes.strip() or None
+    partner.reviewed_by = admin.id
+    partner.reviewed_at = datetime.now()
+    partner.updated_at = datetime.now()
+    db.commit()
+
+    return {"message": f"Delivery partner '{partner.name}' rejected", "partner": partner.to_dict()}
