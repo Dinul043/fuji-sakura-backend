@@ -1,7 +1,12 @@
 """
 Delivery Partner routes
-Phase 1 completed: DB tables created (delivery_partners, delivery_tokens)
-Phase 2 completed: POST /api/delivery/apply — application form endpoint
+✅ Phase 1: DB tables created — delivery_partners, delivery_tokens
+✅ Phase 2: POST /api/delivery/apply — application form endpoint
+✅ Phase 3: Admin approve/reject endpoints in admin_auth.py
+🔜 Phase 4: POST /api/delivery/login
+🔜 Phase 5: GET /api/delivery/available-orders, POST /api/delivery/accept-order/{id}, PUT /api/delivery/complete-order/{id}, PUT /api/delivery/toggle-availability
+🔜 Phase 6: Order flow — partner accepts → out_for_delivery → delivered
+🔜 Phase 7: Earnings — fixed fee per delivery
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
