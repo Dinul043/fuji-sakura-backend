@@ -659,8 +659,8 @@ async def approve_delivery_partner(
     try:
         from app.utils.email import send_restaurant_approval_email
         send_restaurant_approval_email(
-            to_email=partner.email,
-            restaurant_name=partner.name,
+            email=partner.email,
+            restaurant_name=f"Delivery Partner - {partner.name}",
             owner_name=partner.name
         )
     except Exception as e:
@@ -690,5 +690,17 @@ async def reject_delivery_partner(
     partner.reviewed_at = datetime.now()
     partner.updated_at = datetime.now()
     db.commit()
+
+    # Send rejection email
+    try:
+        from app.utils.email import send_restaurant_rejection_email
+        send_restaurant_rejection_email(
+            email=partner.email,
+            restaurant_name=f"Delivery Partner - {partner.name}",
+            owner_name=partner.name,
+            rejection_reason=data.notes.strip() or "Your application did not meet our current requirements."
+        )
+    except Exception as e:
+        print(f"⚠️ Failed to send rejection email: {e}")
 
     return {"message": f"Delivery partner '{partner.name}' rejected", "partner": partner.to_dict()}

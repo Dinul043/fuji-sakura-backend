@@ -35,7 +35,7 @@ class DeliveryApplyRequest(BaseModel):
 
 
 @router.post("/apply", status_code=status.HTTP_201_CREATED)
-def apply_delivery_partner(data: DeliveryApplyRequest, db: Session = Depends(get_db)):
+async def apply_delivery_partner(data: DeliveryApplyRequest, db: Session = Depends(get_db)):
     """
     Submit delivery partner application.
     Status set to pending (0). Password hashed and stored.
@@ -76,6 +76,17 @@ def apply_delivery_partner(data: DeliveryApplyRequest, db: Session = Depends(get
     db.add(partner)
     db.commit()
     db.refresh(partner)
+
+    # Notify all connected admin dashboards via WebSocket
+    try:
+        from app.utils.websocket_manager import manager
+        # Use restaurant_id=0 as a broadcast channel for admin notifications
+        await manager.send_restaurant_notification(0, {
+            "type": "new_delivery_application",
+            "partner": partner.to_dict()
+        })
+    except Exception as e:
+        print(f"⚠️ WebSocket notification failed: {e}")
 
     return {
         "message": "Application submitted successfully! We'll review and notify you via email.",

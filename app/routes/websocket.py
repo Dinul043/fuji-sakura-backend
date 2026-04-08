@@ -74,3 +74,16 @@ async def websocket_restaurant_dashboard(
                 await websocket.send_json({"type": "heartbeat", "status": "connected"})
     except WebSocketDisconnect:
         manager.disconnect_restaurant(websocket, restaurant_id)
+
+@router.websocket("/ws/admin")
+async def websocket_admin(websocket: WebSocket):
+    """WebSocket endpoint for admin dashboard — receives delivery partner application notifications"""
+    # Use restaurant_id=0 as admin broadcast channel
+    await manager.connect_restaurant(websocket, 0)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        manager.disconnect_restaurant(websocket, 0)
