@@ -276,3 +276,133 @@ def delivery_reset_password(data: DeliveryResetRequest, db: Session = Depends(ge
     db.commit()
 
     return {"message": "Password reset successfully. You can now login."}
+
+
+# ── Phase 5: Dashboard APIs ────────────────────────────────────────────────
+
+from fastapi import Header as FastAPIHeader
+
+def get_delivery_partner_from_header(authorization: str, db: Session) -> DeliveryPartner:
+    from app.utils.security import verify_token
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+    payload = verify_token(authorization.split(" ")[1])
+    if not payload or payload.get("type") != "delivery_partner":
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    partner = db.query(DeliveryPartner).filter(
+        DeliveryPartner.id == int(payload.get("sub")),
+        DeliveryPartner.status == 1
+    ).first()
+    if not partner:
+        raise HTTPException(status_code=401, detail="Access denied")
+    return partner
+
+
+@router.put("/toggle-availability")
+def toggle_availability(authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
+    """Toggle delivery partner online/offline status"""
+    partner = get_delivery_partner_from_header(authorization, db)
+    partner.is_available = 0 if partner.is_available else 1
+    partner.updated_at = datetime.now()
+    db.commit()
+    return {"is_available": bool(partner.is_available), "message": "Online" if partner.is_available else "Offline"}
+
+
+@router.get("/available-orders")
+def get_available_orders(authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
+    """
+    Get orders available for pickup:
+    - Status: confirmed or preparing
+    - Not yet assigned to any delivery partner
+    """
+    from app.models.orders import Order, OrderStatus
+    partner = get_delivery_partner_from_header(authorization, db)
+
+    if not partner.is_available:
+        return {"orders": [], "message": "Go online to see available orders"}
+
+    orders = db.query(Order).filter(
+        Order.status.in_([OrderStatus.CONFIRMED, OrderStatus.PREPARING]),
+        Order.delivery_partner_id == None
+    ).order_by(Order.created_at.asc()).all()
+
+    return {"orders": [o.to_dict() for o in orders]}
+
+
+@router.post("/accept-order/{order_id}")
+async def accept_order(order_id: int, authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
+    """Accept an available order — assigns delivery partner, moves to out_for_delivery"""
+    from app.models.orders import Order, OrderStatus
+    from app.utils.websocket_manager import manager
+
+    partner = get_delivery_partner_from_header(authorization, db)
+
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.delivery_partner_id is not None:
+        raise HTTPException(status_code=409, detail="Order already accepted by another partner")
+    if order.status not in [OrderStatus.CONFIRMED, OrderStatus.PREPARING]:
+        raise HTTPException(status_code=400, detail="Order is not available for pickup")
+
+    order.delivery_partner_id = partner.id
+    order.status = OrderStatus.OUT_FOR_DELIVERY
+    order.accepted_at = datetime.now()
+    order.updated_at = datetime.now()
+    db.commit()
+    db.refresh(order)
+
+    # Notify user via WebSocket
+    await manager.send_order_update(order_id, {
+        "type": "order_status_update",
+        "order_id": order_id,
+        "status": "out_for_delivery",
+        "order": order.to_dict()
+    })
+
+    return {"message": "Order accepted", "order": order.to_dict()}
+
+
+@router.put("/complete-order/{order_id}")
+async def complete_order(order_id: int, authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
+    """Mark order as delivered"""
+    from app.models.orders import Order, OrderStatus
+    from app.utils.websocket_manager import manager
+
+    partner = get_delivery_partner_from_header(authorization, db)
+
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.delivery_partner_id == partner.id
+    ).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found or not assigned to you")
+    if order.status != OrderStatus.OUT_FOR_DELIVERY:
+        raise HTTPException(status_code=400, detail="Order is not out for delivery")
+
+    order.status = OrderStatus.DELIVERED
+    order.delivered_at = datetime.now()
+    order.updated_at = datetime.now()
+    db.commit()
+    db.refresh(order)
+
+    # Notify user via WebSocket
+    await manager.send_order_update(order_id, {
+        "type": "order_status_update",
+        "order_id": order_id,
+        "status": "delivered",
+        "order": order.to_dict()
+    })
+
+    return {"message": "Order marked as delivered", "order": order.to_dict()}
+
+
+@router.get("/my-orders")
+def get_my_orders(authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
+    """Get delivery partner's order history"""
+    from app.models.orders import Order
+    partner = get_delivery_partner_from_header(authorization, db)
+    orders = db.query(Order).filter(
+        Order.delivery_partner_id == partner.id
+    ).order_by(Order.accepted_at.desc()).limit(20).all()
+    return {"orders": [o.to_dict() for o in orders]}

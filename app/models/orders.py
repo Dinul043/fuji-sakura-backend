@@ -71,6 +71,10 @@ class Order(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
     confirmed_at = Column(DateTime, nullable=True)
     delivered_at = Column(DateTime, nullable=True)
+    accepted_at = Column(DateTime, nullable=True)  # when delivery partner accepted
+
+    # Delivery partner assignment
+    delivery_partner_id = Column(Integer, nullable=True)
     
     # Relationships
     user = relationship("User", back_populates="orders")
@@ -104,6 +108,8 @@ class Order(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "confirmed_at": self.confirmed_at.isoformat() if self.confirmed_at else None,
             "delivered_at": self.delivered_at.isoformat() if self.delivered_at else None,
+            "accepted_at": self.accepted_at.isoformat() if self.accepted_at else None,
+            "delivery_partner_id": self.delivery_partner_id,
             "items": [item.to_dict() for item in self.order_items] if self.order_items else []
         }
 
