@@ -332,11 +332,16 @@ def get_available_orders(authorization: str = FastAPIHeader(None), db: Session =
     if not partner.upi_id:
         return {"orders": [], "message": "Please add your UPI ID in your profile before taking orders"}
 
-    # Get restaurant IDs in partner's city
+    # Get restaurant IDs in partner's city (and area if set)
     restaurant_query = db.query(RestaurantApplication.id).filter(
-        RestaurantApplication.address.ilike(f"%{partner.city}%"),
+        RestaurantApplication.city == partner.city,
         RestaurantApplication.status == 1
     )
+    # Fix 4: area match OR partner.area is NULL — partners without area see all city orders
+    if partner.area:
+        restaurant_query = restaurant_query.filter(
+            (RestaurantApplication.area == partner.area) | (RestaurantApplication.area == None)
+        )
     restaurant_ids = [r[0] for r in restaurant_query.all()]
 
     if not restaurant_ids:
@@ -347,10 +352,6 @@ def get_available_orders(authorization: str = FastAPIHeader(None), db: Session =
         Order.delivery_partner_id == None,
         Order.restaurant_id.in_(restaurant_ids)
     )
-
-    # Fix 4: area match OR partner.area is NULL — so partners without area still see orders
-    if partner.area:
-        query = query.filter(Order.delivery_address.ilike(f"%{partner.area}%"))
 
     orders = query.order_by(Order.created_at.asc()).all()
     return {"orders": [o.to_dict() for o in orders]}

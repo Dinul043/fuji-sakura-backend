@@ -46,6 +46,8 @@ class RestaurantApplicationRequest(BaseModel):
     password: str
     phone: str
     address: str
+    city: str = ""      # e.g. Chennai
+    area: str = ""      # e.g. Karapakkam
     cuisineType: str
     description: str
     businessLicense: str
@@ -154,6 +156,14 @@ async def submit_restaurant_application(application_data: RestaurantApplicationR
             business_license=application_data.businessLicense,
             food_permit=application_data.foodPermit
         )
+
+        # Save city and area
+        if application_data.city:
+            application.city = application_data.city.strip()
+        if application_data.area:
+            application.area = application_data.area.strip()
+        db.commit()
+        db.refresh(application)
         
         return RestaurantApplicationResponse(**application.to_dict())
         

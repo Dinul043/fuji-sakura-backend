@@ -41,6 +41,8 @@ class RestaurantApplication(Base):
     phone = Column(String(20), nullable=False)
     address = Column(Text, nullable=False)
     cuisine_type = Column(String(100), nullable=False)
+    city = Column(String(100), nullable=True)   # e.g. Chennai
+    area = Column(String(100), nullable=True)   # e.g. Karapakkam, Velachery
     description = Column(Text, nullable=False)
     business_license = Column(String(255), nullable=False)
     food_permit = Column(String(255), nullable=False)
@@ -138,6 +140,8 @@ class RestaurantApplication(Base):
             'phone': self.phone,
             'address': self.address,
             'cuisine_type': self.cuisine_type,
+            'city': self.city,
+            'area': self.area,
             'description': self.description,
             'business_license': self.business_license,
             'food_permit': self.food_permit,
