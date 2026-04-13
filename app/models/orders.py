@@ -75,6 +75,7 @@ class Order(Base):
 
     # Delivery partner assignment
     delivery_partner_id = Column(Integer, nullable=True)
+    cod_collected = Column(Integer, default=0, nullable=True)  # 1 = COD collected by partner
     
     # Relationships
     user = relationship("User", back_populates="orders")
@@ -110,6 +111,7 @@ class Order(Base):
             "delivered_at": self.delivered_at.isoformat() if self.delivered_at else None,
             "accepted_at": self.accepted_at.isoformat() if self.accepted_at else None,
             "delivery_partner_id": self.delivery_partner_id,
+            "cod_collected": bool(self.cod_collected),
             "items": [item.to_dict() for item in self.order_items] if self.order_items else []
         }
 

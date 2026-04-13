@@ -20,6 +20,8 @@ class DeliveryPartner(Base):
     vehicle_type = Column(String(20), nullable=False)   # bike / scooter / bicycle
     vehicle_number = Column(String(50), nullable=False)
     city = Column(String(100), nullable=False)
+    area = Column(String(100), nullable=True)   # locality/area within city
+    upi_id = Column(String(100), nullable=True)  # mandatory before taking orders
     status = Column(Integer, default=0, nullable=False)  # 0=pending, 1=approved, 2=rejected
     is_available = Column(Integer, default=0, nullable=False)  # online/offline
     admin_notes = Column(Text, nullable=True)
@@ -40,6 +42,8 @@ class DeliveryPartner(Base):
             "vehicle_type": self.vehicle_type,
             "vehicle_number": self.vehicle_number,
             "city": self.city,
+            "area": self.area,
+            "upi_id": self.upi_id,
             "status": self.status,
             "is_available": bool(self.is_available),
             "admin_notes": self.admin_notes,
@@ -59,3 +63,32 @@ class DeliveryToken(Base):
     created_at = Column(DateTime, default=datetime.now)
 
     partner = relationship("DeliveryPartner", back_populates="tokens")
+
+
+from sqlalchemy import Numeric
+
+class DeliveryEarning(Base):
+    __tablename__ = "delivery_earnings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    partner_id = Column(Integer, ForeignKey("delivery_partners.id", ondelete="CASCADE"), nullable=False)
+    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"), unique=True, nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False, default=40.00)  # fixed delivery fee
+    payment_type = Column(String(20), nullable=False, default="online")  # online / cod
+    cod_amount = Column(Numeric(10, 2), default=0.00)  # amount collected from customer for COD
+    payout_status = Column(String(20), default="pending")  # pending / paid
+    paid_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "partner_id": self.partner_id,
+            "order_id": self.order_id,
+            "amount": float(self.amount),
+            "payment_type": self.payment_type,
+            "cod_amount": float(self.cod_amount),
+            "payout_status": self.payout_status,
+            "paid_at": self.paid_at.isoformat() if self.paid_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }

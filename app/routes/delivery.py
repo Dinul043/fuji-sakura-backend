@@ -29,9 +29,11 @@ class DeliveryApplyRequest(BaseModel):
     email: str
     phone: str
     password: str
-    vehicle_type: str   # bike / scooter / bicycle
+    vehicle_type: str
     vehicle_number: str
     city: str
+    area: str = ""       # locality within city
+    upi_id: str = ""     # optional at signup, mandatory before taking orders
 
 
 @router.post("/apply", status_code=status.HTTP_201_CREATED)
@@ -70,8 +72,10 @@ async def apply_delivery_partner(data: DeliveryApplyRequest, db: Session = Depen
         vehicle_type=data.vehicle_type.lower().strip(),
         vehicle_number=data.vehicle_number.strip().upper(),
         city=data.city.strip(),
-        status=0,       # pending
-        is_available=0  # offline by default
+        area=data.area.strip() or None,
+        upi_id=data.upi_id.strip() or None,
+        status=0,
+        is_available=0
     )
     db.add(partner)
     db.commit()
@@ -314,18 +318,41 @@ def get_available_orders(authorization: str = FastAPIHeader(None), db: Session =
     Get orders available for pickup:
     - Status: confirmed or preparing
     - Not yet assigned to any delivery partner
+    - Filtered by partner's city (and area if set)
+    - Partner must have UPI ID set
     """
     from app.models.orders import Order, OrderStatus
+    from app.models.restaurant_application import RestaurantApplication
     partner = get_delivery_partner_from_header(authorization, db)
 
     if not partner.is_available:
         return {"orders": [], "message": "Go online to see available orders"}
 
-    orders = db.query(Order).filter(
-        Order.status.in_([OrderStatus.CONFIRMED, OrderStatus.PREPARING]),
-        Order.delivery_partner_id == None
-    ).order_by(Order.created_at.asc()).all()
+    # Fix 1: UPI check — block if no UPI set
+    if not partner.upi_id:
+        return {"orders": [], "message": "Please add your UPI ID in your profile before taking orders"}
 
+    # Get restaurant IDs in partner's city
+    restaurant_query = db.query(RestaurantApplication.id).filter(
+        RestaurantApplication.address.ilike(f"%{partner.city}%"),
+        RestaurantApplication.status == 1
+    )
+    restaurant_ids = [r[0] for r in restaurant_query.all()]
+
+    if not restaurant_ids:
+        return {"orders": [], "message": "No restaurants in your area"}
+
+    query = db.query(Order).filter(
+        Order.status.in_([OrderStatus.CONFIRMED, OrderStatus.PREPARING]),
+        Order.delivery_partner_id == None,
+        Order.restaurant_id.in_(restaurant_ids)
+    )
+
+    # Fix 4: area match OR partner.area is NULL — so partners without area still see orders
+    if partner.area:
+        query = query.filter(Order.delivery_address.ilike(f"%{partner.area}%"))
+
+    orders = query.order_by(Order.created_at.asc()).all()
     return {"orders": [o.to_dict() for o in orders]}
 
 
@@ -336,6 +363,10 @@ async def accept_order(order_id: int, authorization: str = FastAPIHeader(None), 
     from app.utils.websocket_manager import manager
 
     partner = get_delivery_partner_from_header(authorization, db)
+
+    # Fix 1: UPI check in accept_order too
+    if not partner.upi_id:
+        raise HTTPException(status_code=400, detail="Please add your UPI ID in your profile before accepting orders")
 
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
@@ -386,6 +417,24 @@ async def complete_order(order_id: int, authorization: str = FastAPIHeader(None)
     db.commit()
     db.refresh(order)
 
+    # Record earnings — Fix 2: duplication protection, Fix 3: COD logic, Fix 5: config fee
+    from app.models.delivery_partner import DeliveryEarning
+    DELIVERY_FEE = 40.00  # Fix 5: easy to change
+
+    existing_earning = db.query(DeliveryEarning).filter(DeliveryEarning.order_id == order.id).first()
+    if not existing_earning:  # Fix 2: skip if already recorded
+        is_cod = order.payment_method and order.payment_method.lower() == 'cod'  # Fix 3: only COD orders
+        earning = DeliveryEarning(
+            partner_id=partner.id,
+            order_id=order.id,
+            amount=DELIVERY_FEE,
+            payment_type="cod" if is_cod else "online",
+            cod_amount=float(order.total_amount) if is_cod else 0.00,  # Fix 3: only set for COD
+            payout_status="pending"
+        )
+        db.add(earning)
+        db.commit()
+
     # Notify user via WebSocket
     await manager.send_order_update(order_id, {
         "type": "order_status_update",
@@ -406,3 +455,73 @@ def get_my_orders(authorization: str = FastAPIHeader(None), db: Session = Depend
         Order.delivery_partner_id == partner.id
     ).order_by(Order.accepted_at.desc()).limit(20).all()
     return {"orders": [o.to_dict() for o in orders]}
+
+
+@router.put("/mark-cod-collected/{order_id}")
+def mark_cod_collected(order_id: int, authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
+    """Mark COD amount as collected from customer"""
+    from app.models.orders import Order
+    partner = get_delivery_partner_from_header(authorization, db)
+    order = db.query(Order).filter(Order.id == order_id, Order.delivery_partner_id == partner.id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    # Fix 3: only allow for COD orders
+    if not order.payment_method or order.payment_method.lower() != 'cod':
+        raise HTTPException(status_code=400, detail="This is not a COD order")
+    order.cod_collected = 1
+    order.updated_at = datetime.now()
+    db.commit()
+    return {"message": "COD marked as collected"}
+
+
+@router.get("/earnings")
+def get_earnings(authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
+    """Get delivery partner earnings summary"""
+    from app.models.delivery_partner import DeliveryEarning
+    from datetime import date
+    partner = get_delivery_partner_from_header(authorization, db)
+
+    all_earnings = db.query(DeliveryEarning).filter(DeliveryEarning.partner_id == partner.id).all()
+    today = date.today()
+    today_earnings = [e for e in all_earnings if e.created_at and e.created_at.date() == today]
+    pending = [e for e in all_earnings if e.payout_status == "pending"]
+    cod_pending = [e for e in pending if e.payment_type == "cod"]
+
+    return {
+        "today_deliveries": len(today_earnings),
+        "today_earnings": sum(float(e.amount) for e in today_earnings),
+        "total_deliveries": len(all_earnings),
+        "total_earnings": sum(float(e.amount) for e in all_earnings),
+        "pending_payout": sum(float(e.amount) for e in pending),
+        "cod_to_submit": sum(float(e.cod_amount) for e in cod_pending),
+        "earnings": [e.to_dict() for e in all_earnings[-10:]]  # last 10
+    }
+
+
+@router.get("/profile")
+def get_delivery_profile(authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
+    """Get delivery partner profile"""
+    partner = get_delivery_partner_from_header(authorization, db)
+    return partner.to_dict()
+
+
+@router.put("/profile")
+def update_delivery_profile(
+    upi_id: str = None,
+    area: str = None,
+    phone: str = None,
+    authorization: str = FastAPIHeader(None),
+    db: Session = Depends(get_db)
+):
+    """Update delivery partner profile (UPI, area, phone)"""
+    from pydantic import BaseModel as BM
+    partner = get_delivery_partner_from_header(authorization, db)
+    if upi_id is not None:
+        partner.upi_id = upi_id.strip() or None
+    if area is not None:
+        partner.area = area.strip() or None
+    if phone is not None:
+        partner.phone = phone.strip()
+    partner.updated_at = datetime.now()
+    db.commit()
+    return {"message": "Profile updated", "partner": partner.to_dict()}
