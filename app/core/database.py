@@ -15,7 +15,7 @@ engine = create_engine(
     pool_pre_ping=True,   # Verify connections before use
     pool_recycle=300,     # Recycle connections every 5 minutes
     connect_args={
-        "init_command": "SET time_zone = '+00:00'"  # Force UTC timezone
+        "init_command": "SET time_zone = '+05:30'"  # IST timezone — matches server local time
     }
 )
 
