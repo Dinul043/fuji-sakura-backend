@@ -19,6 +19,9 @@ class DeliveryPartner(Base):
     phone = Column(String(20), nullable=False)
     vehicle_type = Column(String(20), nullable=False)   # bike / scooter / bicycle
     vehicle_number = Column(String(50), nullable=False)
+    driving_license = Column(String(50), nullable=True)   # mandatory for bike/scooter
+    aadhar_number = Column(String(12), nullable=True)     # government ID verification
+    profile_image = Column(String(500), nullable=True)    # photo for identity verification
     city = Column(String(100), nullable=False)
     area = Column(String(100), nullable=True)   # locality/area within city
     upi_id = Column(String(100), nullable=True)  # mandatory before taking orders
@@ -41,6 +44,9 @@ class DeliveryPartner(Base):
             "phone": self.phone,
             "vehicle_type": self.vehicle_type,
             "vehicle_number": self.vehicle_number,
+            "driving_license": self.driving_license,
+            "aadhar_number": self.aadhar_number,
+            "profile_image": self.profile_image,
             "city": self.city,
             "area": self.area,
             "upi_id": self.upi_id,

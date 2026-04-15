@@ -31,9 +31,11 @@ class DeliveryApplyRequest(BaseModel):
     password: str
     vehicle_type: str
     vehicle_number: str
+    driving_license: str = ""   # mandatory for bike/scooter
+    aadhar_number: str = ""     # 12-digit Aadhar
     city: str
-    area: str = ""       # locality within city
-    upi_id: str = ""     # optional at signup, mandatory before taking orders
+    area: str = ""
+    upi_id: str = ""
 
 
 @router.post("/apply", status_code=status.HTTP_201_CREATED)
@@ -45,6 +47,12 @@ async def apply_delivery_partner(data: DeliveryApplyRequest, db: Session = Depen
     # Validate vehicle type
     if data.vehicle_type.lower() not in VEHICLE_TYPES:
         raise HTTPException(status_code=400, detail=f"Vehicle type must be one of: {', '.join(VEHICLE_TYPES)}")
+
+    if not data.city.strip():
+        raise HTTPException(status_code=400, detail="City is required")
+
+    if not data.area.strip():
+        raise HTTPException(status_code=400, detail="Area / Locality is required")
 
     # Validate password length
     if len(data.password.strip()) < 8:
@@ -71,6 +79,8 @@ async def apply_delivery_partner(data: DeliveryApplyRequest, db: Session = Depen
         phone=data.phone.strip(),
         vehicle_type=data.vehicle_type.lower().strip(),
         vehicle_number=data.vehicle_number.strip().upper(),
+        driving_license=data.driving_license.strip().upper() or None,
+        aadhar_number=data.aadhar_number.strip() or None,
         city=data.city.strip(),
         area=data.area.strip() or None,
         upi_id=data.upi_id.strip() or None,
@@ -332,28 +342,24 @@ def get_available_orders(authorization: str = FastAPIHeader(None), db: Session =
     if not partner.upi_id:
         return {"orders": [], "message": "Please add your UPI ID in your profile before taking orders"}
 
-    # Get restaurant IDs in partner's city (and area if set)
+    # Fix: Always match city + area (both mandatory — no optional condition)
     restaurant_query = db.query(RestaurantApplication.id).filter(
         RestaurantApplication.city == partner.city,
+        RestaurantApplication.area == partner.area,
         RestaurantApplication.status == 1
     )
-    # Fix 4: area match OR partner.area is NULL — partners without area see all city orders
-    if partner.area:
-        restaurant_query = restaurant_query.filter(
-            (RestaurantApplication.area == partner.area) | (RestaurantApplication.area == None)
-        )
     restaurant_ids = [r[0] for r in restaurant_query.all()]
 
     if not restaurant_ids:
-        return {"orders": [], "message": "No restaurants in your area"}
+        return {"orders": [], "message": f"No restaurants found in {partner.city} - {partner.area}"}
 
-    query = db.query(Order).filter(
+    # Fix: Only confirmed/preparing orders, not assigned, from matching restaurants
+    orders = db.query(Order).filter(
         Order.status.in_([OrderStatus.CONFIRMED, OrderStatus.PREPARING]),
         Order.delivery_partner_id == None,
         Order.restaurant_id.in_(restaurant_ids)
-    )
+    ).order_by(Order.created_at.asc()).all()
 
-    orders = query.order_by(Order.created_at.asc()).all()
     return {"orders": [o.to_dict() for o in orders]}
 
 
@@ -509,16 +515,29 @@ def get_delivery_profile(authorization: str = FastAPIHeader(None), db: Session =
 @router.put("/profile")
 def update_delivery_profile(
     upi_id: str = None,
+    city: str = None,
     area: str = None,
     phone: str = None,
     authorization: str = FastAPIHeader(None),
     db: Session = Depends(get_db)
 ):
-    """Update delivery partner profile (UPI, area, phone)"""
-    from pydantic import BaseModel as BM
+    """Update delivery partner profile (UPI, city, area, phone)"""
+    from app.models.orders import Order, OrderStatus
     partner = get_delivery_partner_from_header(authorization, db)
+
+    # Block location change if partner has active delivery
+    if (city is not None or area is not None):
+        active = db.query(Order).filter(
+            Order.delivery_partner_id == partner.id,
+            Order.status == OrderStatus.OUT_FOR_DELIVERY
+        ).first()
+        if active:
+            raise HTTPException(status_code=400, detail="Cannot change location while you have an active delivery in progress")
+
     if upi_id is not None:
         partner.upi_id = upi_id.strip() or None
+    if city is not None:
+        partner.city = city.strip()
     if area is not None:
         partner.area = area.strip() or None
     if phone is not None:
