@@ -101,13 +101,6 @@ def get_authenticated_restaurant(authorization: str, db: Session) -> RestaurantA
     
     print(f"🔐 Authenticated Restaurant: {restaurant_app.business_name} (ID: {restaurant_app.id}, Email: {restaurant_app.email})")
     
-    # Validate session is still active
-    if not restaurant_app.is_session_active(token):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session expired or invalid. Please login again."
-        )
-    
     return restaurant_app
 
 @router.get("/categories")

@@ -606,49 +606,6 @@ async def restaurant_logout(authorization: str = Header(None), db: Session = Dep
             detail="Logout failed"
         )
 
-@router.get("/debug/session-status")
-async def debug_session_status(authorization: str = Header(None), db: Session = Depends(get_db)):
-    """Debug endpoint to check session status"""
-    try:
-        if not authorization or not authorization.startswith("Bearer "):
-            return {"error": "No authorization header"}
-        
-        token = authorization.split(" ")[1]
-        
-        from app.utils.security import verify_token
-        
-        payload = verify_token(token)
-        if not payload:
-            return {"error": "Invalid token"}
-        
-        restaurant_email = payload.get("sub")
-        if not restaurant_email:
-            return {"error": "No email in token"}
-        
-        # Get restaurant application
-        restaurant_app = db.query(RestaurantApplication).filter(
-            RestaurantApplication.email == restaurant_email,
-            RestaurantApplication.status == ApplicationStatus.APPROVED
-        ).first()
-        
-        if not restaurant_app:
-            return {"error": "Restaurant not found"}
-        
-        current_time = datetime.now()
-        
-        return {
-            "restaurant_email": restaurant_email,
-            "has_active_session_token": bool(restaurant_app.active_session_token),
-            "session_expires_at": restaurant_app.session_expires_at.isoformat() if restaurant_app.session_expires_at else None,
-            "current_time": current_time.isoformat(),
-            "session_expired": restaurant_app.session_expires_at <= current_time if restaurant_app.session_expires_at else True,
-            "has_active_session": restaurant_app.has_active_session(),
-            "is_session_active": restaurant_app.is_session_active(token)
-        }
-        
-    except Exception as e:
-        return {"error": str(e)}
-
 @router.post("/login", response_model=RestaurantLoginResponse)
 async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Depends(get_db)):
     """Restaurant login endpoint"""
@@ -951,52 +908,6 @@ async def get_restaurant_categories(db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch categories"
-        )
-
-@router.post("/admin/clear-sessions")
-async def admin_clear_all_sessions(db: Session = Depends(get_db)):
-    """Admin endpoint to clear all active sessions (for debugging)"""
-    try:
-        # Clear all active sessions
-        result = db.execute(text("UPDATE restaurant_applications SET active_session_token = NULL, session_expires_at = NULL WHERE active_session_token IS NOT NULL"))
-        db.commit()
-        
-        return {
-            "message": f"Cleared {result.rowcount} active sessions",
-            "cleared_count": result.rowcount
-        }
-    except Exception as e:
-        print(f"Clear sessions error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to clear sessions"
-        )
-
-@router.get("/admin/session-status")
-async def get_session_status(db: Session = Depends(get_db)):
-    """Admin endpoint to check current session status"""
-    try:
-        # Get all active sessions
-        result = db.execute(text("SELECT email, business_name, active_session_token IS NOT NULL as has_token, session_expires_at FROM restaurant_applications WHERE status = 1"))
-        sessions = result.fetchall()
-        
-        return {
-            "total_approved_restaurants": len(sessions),
-            "restaurants": [
-                {
-                    "email": session[0],
-                    "business_name": session[1],
-                    "has_active_session": bool(session[2]),
-                    "session_expires_at": session[3].isoformat() if session[3] else None
-                }
-                for session in sessions
-            ]
-        }
-    except Exception as e:
-        print(f"Session status error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get session status"
         )
 
 @router.get("/admin/integrity-check")
