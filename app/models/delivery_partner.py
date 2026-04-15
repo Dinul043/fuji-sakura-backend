@@ -79,10 +79,10 @@ class DeliveryEarning(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     partner_id = Column(Integer, ForeignKey("delivery_partners.id", ondelete="CASCADE"), nullable=False)
     order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"), unique=True, nullable=False)
-    amount = Column(Numeric(10, 2), nullable=False, default=40.00)  # fixed delivery fee
+    amount = Column(Numeric(10, 2), nullable=False, default=40.00)  # fixed delivery fee ₹40
     payment_type = Column(String(20), nullable=False, default="online")  # online / cod
-    cod_amount = Column(Numeric(10, 2), default=0.00)  # amount collected from customer for COD
-    payout_status = Column(String(20), default="pending")  # pending / paid
+    cod_amount = Column(Numeric(10, 2), default=0.00)  # COD tracked separately — NOT part of payout
+    status = Column(String(20), default="pending")  # pending / paid
     paid_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
@@ -94,7 +94,7 @@ class DeliveryEarning(Base):
             "amount": float(self.amount),
             "payment_type": self.payment_type,
             "cod_amount": float(self.cod_amount),
-            "payout_status": self.payout_status,
+            "status": self.status,
             "paid_at": self.paid_at.isoformat() if self.paid_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

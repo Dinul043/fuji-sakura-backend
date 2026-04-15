@@ -704,3 +704,104 @@ async def reject_delivery_partner(
         print(f"⚠️ Failed to send rejection email: {e}")
 
     return {"message": f"Delivery partner '{partner.name}' rejected", "partner": partner.to_dict()}
+
+
+# ── Admin Payout Tracking ──────────────────────────────────────────────────
+
+@router.get("/delivery-payouts")
+async def get_delivery_payouts(
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all delivery partners with earnings summary.
+    Fix 3: COD tracked separately — NOT included in payout calculation.
+    Fix 4: net_settlement = pending_payout - cod_to_collect (who owes whom).
+    """
+    get_admin_from_token(authorization, db)
+    from app.models.delivery_partner import DeliveryPartner, DeliveryEarning
+
+    partners = db.query(DeliveryPartner).filter(DeliveryPartner.status == 1).all()
+    result = []
+    for p in partners:
+        earnings = db.query(DeliveryEarning).filter(DeliveryEarning.partner_id == p.id).all()
+        pending = [e for e in earnings if e.status == "pending"]
+        paid = [e for e in earnings if e.status == "paid"]
+        # Fix 3: COD tracked separately — only for display, not part of payout
+        cod_collected = [e for e in earnings if e.payment_type == "cod" and float(e.cod_amount) > 0]
+
+        pending_payout = float(sum(e.amount for e in pending))
+        cod_total = float(sum(e.cod_amount for e in cod_collected))
+        # Fix 4: net_settlement — positive = company owes partner, negative = partner owes company
+        net_settlement = pending_payout - cod_total
+
+        result.append({
+            "id": p.id,
+            "name": p.name,
+            "email": p.email,
+            "phone": p.phone,
+            "upi_id": p.upi_id,
+            "city": p.city,
+            "area": p.area,
+            "total_deliveries": len(earnings),
+            "pending_deliveries": len(pending),
+            "pending_payout": pending_payout,           # company → partner (₹40 per delivery)
+            "cod_collected_by_partner": cod_total,      # partner → company (cash from customers)
+            "net_settlement": round(net_settlement, 2), # Fix 4: net amount
+            "total_paid": float(sum(e.amount for e in paid)),
+            "is_available": bool(p.is_available)
+        })
+
+    return {"partners": result, "total": len(result)}
+
+
+class PayoutRequest(BaseModel):
+    partner_id: int
+    notes: str = ""
+
+
+@router.put("/delivery-payout/mark-paid/{partner_id}")
+async def mark_payout_paid(
+    partner_id: int,
+    data: PayoutRequest,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Mark all pending earnings as paid.
+    Fix 2: paid_at timestamp records when payout happened (audit trail).
+    Fix 6: returns error if nothing to pay.
+    """
+    get_admin_from_token(authorization, db)
+    from app.models.delivery_partner import DeliveryPartner, DeliveryEarning
+
+    partner = db.query(DeliveryPartner).filter(DeliveryPartner.id == partner_id).first()
+    if not partner:
+        raise HTTPException(status_code=404, detail="Delivery partner not found")
+
+    pending = db.query(DeliveryEarning).filter(
+        DeliveryEarning.partner_id == partner_id,
+        DeliveryEarning.status == "pending"
+    ).all()
+
+    # Fix 6: safety check
+    if not pending:
+        raise HTTPException(status_code=400, detail="Nothing to pay — no pending earnings for this partner")
+
+    if not partner.upi_id:
+        raise HTTPException(status_code=400, detail="Partner has no UPI ID — cannot process payout")
+
+    total = sum(float(e.amount) for e in pending)
+    paid_time = datetime.now()
+    for e in pending:
+        e.status = "paid"
+        e.paid_at = paid_time  # Fix 2: timestamp for audit trail
+    db.commit()
+
+    return {
+        "message": f"Marked {len(pending)} deliveries as paid for {partner.name}",
+        "amount_paid": round(total, 2),
+        "partner_upi": partner.upi_id,
+        "paid_at": paid_time.isoformat(),
+        "deliveries_count": len(pending)
+    }

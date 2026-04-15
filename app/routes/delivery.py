@@ -437,7 +437,7 @@ async def complete_order(order_id: int, authorization: str = FastAPIHeader(None)
             amount=DELIVERY_FEE,
             payment_type="cod" if is_cod else "online",
             cod_amount=float(order.total_amount) if is_cod else 0.00,  # Fix 3: only set for COD
-            payout_status="pending"
+            status="pending"
         )
         db.add(earning)
         db.commit()
@@ -491,7 +491,7 @@ def get_earnings(authorization: str = FastAPIHeader(None), db: Session = Depends
     all_earnings = db.query(DeliveryEarning).filter(DeliveryEarning.partner_id == partner.id).all()
     today = date.today()
     today_earnings = [e for e in all_earnings if e.created_at and e.created_at.date() == today]
-    pending = [e for e in all_earnings if e.payout_status == "pending"]
+    pending = [e for e in all_earnings if e.status == "pending"]
     cod_pending = [e for e in pending if e.payment_type == "cod"]
 
     return {
