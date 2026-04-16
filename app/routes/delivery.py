@@ -435,6 +435,14 @@ async def complete_order(order_id: int, authorization: str = FastAPIHeader(None)
     ).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found or not assigned to you")
+
+    # Auto-fix: if order is READY with this partner assigned, move it to OUT_FOR_DELIVERY
+    if order.status == OrderStatus.READY:
+        order.status = OrderStatus.OUT_FOR_DELIVERY
+        order.updated_at = datetime.now()
+        db.commit()
+        db.refresh(order)
+
     if order.status != OrderStatus.OUT_FOR_DELIVERY:
         raise HTTPException(status_code=400, detail="Order is not out for delivery")
 
