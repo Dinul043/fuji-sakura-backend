@@ -366,13 +366,16 @@ def get_available_orders(authorization: str = FastAPIHeader(None), db: Session =
 
 @router.post("/accept-order/{order_id}")
 async def accept_order(order_id: int, authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
-    """Accept an available order — assigns delivery partner, moves to out_for_delivery"""
+    """
+    Accept an available order.
+    Assigns partner and sets status to READY (partner is heading to restaurant).
+    Partner must click 'Food Picked Up' to move to OUT_FOR_DELIVERY.
+    """
     from app.models.orders import Order, OrderStatus
     from app.utils.websocket_manager import manager
 
     partner = get_delivery_partner_from_header(authorization, db)
 
-    # Fix 1: UPI check in accept_order too
     if not partner.upi_id:
         raise HTTPException(status_code=400, detail="Please add your UPI ID in your profile before accepting orders")
 
@@ -384,19 +387,67 @@ async def accept_order(order_id: int, authorization: str = FastAPIHeader(None), 
     if order.status not in [OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY]:
         raise HTTPException(status_code=400, detail="Order is not available for pickup")
 
+    # Assign partner — status becomes READY (partner on the way to restaurant)
     order.delivery_partner_id = partner.id
-    order.status = OrderStatus.OUT_FOR_DELIVERY
+    order.status = OrderStatus.READY
     order.accepted_at = datetime.now()
     order.updated_at = datetime.now()
     db.commit()
     db.refresh(order)
 
-    # Build enriched order dict with partner info
     order_dict = order.to_dict()
     order_dict["delivery_partner_name"] = partner.name
     order_dict["delivery_partner_phone"] = partner.phone
 
-    # Notify user via WebSocket
+    # Notify restaurant — partner is on the way to pick up
+    await manager.send_restaurant_status_update(order.restaurant_id, {
+        "type": "order_status_update",
+        "order_id": order.id,
+        "status": "ready",
+        "partner_on_the_way": True,
+        "order": order_dict
+    })
+
+    # Remove from available list for all other delivery partners
+    await manager.broadcast_to_delivery_partners({
+        "type": "order_taken",
+        "order_id": order.id
+    })
+
+    return {"message": "Order accepted! Head to the restaurant.", "order": order_dict}
+
+
+@router.post("/pickup-order/{order_id}")
+async def pickup_order(order_id: int, authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
+    """
+    Delivery partner has physically picked up the food from the restaurant.
+    Moves order READY -> OUT_FOR_DELIVERY.
+    Notifies user and restaurant.
+    """
+    from app.models.orders import Order, OrderStatus
+    from app.utils.websocket_manager import manager
+
+    partner = get_delivery_partner_from_header(authorization, db)
+
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.delivery_partner_id == partner.id
+    ).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found or not assigned to you")
+    if order.status != OrderStatus.READY:
+        raise HTTPException(status_code=400, detail="Order is not ready for pickup or already picked up")
+
+    order.status = OrderStatus.OUT_FOR_DELIVERY
+    order.updated_at = datetime.now()
+    db.commit()
+    db.refresh(order)
+
+    order_dict = order.to_dict()
+    order_dict["delivery_partner_name"] = partner.name
+    order_dict["delivery_partner_phone"] = partner.phone
+
+    # Notify user — order is now on the way
     await manager.send_order_update(order_id, {
         "type": "order_status_update",
         "order_id": order_id,
@@ -404,7 +455,7 @@ async def accept_order(order_id: int, authorization: str = FastAPIHeader(None), 
         "order": order_dict
     })
 
-    # Notify restaurant that order was picked up (direct status update, not wrapped as new_order)
+    # Notify restaurant — food has been picked up
     await manager.send_restaurant_status_update(order.restaurant_id, {
         "type": "order_status_update",
         "order_id": order.id,
@@ -412,13 +463,7 @@ async def accept_order(order_id: int, authorization: str = FastAPIHeader(None), 
         "order": order_dict
     })
 
-    # Remove this order from available orders list for all other delivery partners
-    await manager.broadcast_to_delivery_partners({
-        "type": "order_taken",
-        "order_id": order.id
-    })
-
-    return {"message": "Order accepted", "order": order_dict}
+    return {"message": "Food picked up! Head to the customer.", "order": order_dict}
 
 
 @router.put("/complete-order/{order_id}")
@@ -435,16 +480,8 @@ async def complete_order(order_id: int, authorization: str = FastAPIHeader(None)
     ).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found or not assigned to you")
-
-    # Auto-fix: if order is READY with this partner assigned, move it to OUT_FOR_DELIVERY
-    if order.status == OrderStatus.READY:
-        order.status = OrderStatus.OUT_FOR_DELIVERY
-        order.updated_at = datetime.now()
-        db.commit()
-        db.refresh(order)
-
     if order.status != OrderStatus.OUT_FOR_DELIVERY:
-        raise HTTPException(status_code=400, detail="Order is not out for delivery")
+        raise HTTPException(status_code=400, detail="Please mark food as picked up before marking as delivered")
 
     order.status = OrderStatus.DELIVERED
     order.delivered_at = datetime.now()
@@ -496,22 +533,18 @@ async def complete_order(order_id: int, authorization: str = FastAPIHeader(None)
 
 @router.get("/active-order")
 def get_active_order(authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
-    """Get delivery partner's current active order (out_for_delivery or ready with partner assigned)"""
+    """
+    Get delivery partner's current active order.
+    Returns READY (heading to restaurant) or OUT_FOR_DELIVERY (heading to customer).
+    """
     from app.models.orders import Order, OrderStatus
     partner = get_delivery_partner_from_header(authorization, db)
-    # Check both OUT_FOR_DELIVERY and READY (in case status update failed)
     order = db.query(Order).filter(
         Order.delivery_partner_id == partner.id,
-        Order.status.in_([OrderStatus.OUT_FOR_DELIVERY, OrderStatus.READY])
+        Order.status.in_([OrderStatus.READY, OrderStatus.OUT_FOR_DELIVERY])
     ).first()
     if not order:
         return {"order": None}
-    # If READY with partner assigned, fix status to OUT_FOR_DELIVERY
-    if order.status == OrderStatus.READY:
-        order.status = OrderStatus.OUT_FOR_DELIVERY
-        order.updated_at = datetime.now()
-        db.commit()
-        db.refresh(order)
     return {"order": order.to_dict()}
 
 
