@@ -263,15 +263,25 @@ async def get_restaurant_orders(
 ):
     """Get all orders for a specific restaurant (for restaurant dashboard)"""
     try:
-        # Exclude PENDING orders — these are online payment orders not yet paid
-        # Only show CONFIRMED and beyond (COD confirmed immediately, online confirmed after payment)
+        from app.models.delivery_partner import DeliveryPartner
         orders = db.query(Order).filter(
             Order.restaurant_id == restaurant_id,
             Order.status != OrderStatus.PENDING
         ).order_by(Order.created_at.desc()).all()
-        
-        return [order.to_dict() for order in orders]
-        
+
+        result = []
+        for order in orders:
+            d = order.to_dict()
+            # Include delivery partner name if assigned
+            if order.delivery_partner_id:
+                partner = db.query(DeliveryPartner).filter(DeliveryPartner.id == order.delivery_partner_id).first()
+                if partner:
+                    d["delivery_partner_name"] = partner.name
+                    d["delivery_partner_phone"] = partner.phone
+            result.append(d)
+
+        return result
+
     except Exception as e:
         print(f"❌ Error fetching restaurant orders: {str(e)}")
         raise HTTPException(
@@ -367,7 +377,7 @@ async def update_order_status(
         db.commit()
         db.refresh(order)
         
-        # Broadcast update via WebSocket
+        # Broadcast update via WebSocket to user tracking
         await manager.send_order_update(order_id, {
             "type": "order_status_update",
             "order_id": order_id,

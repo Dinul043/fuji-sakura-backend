@@ -353,9 +353,10 @@ def get_available_orders(authorization: str = FastAPIHeader(None), db: Session =
     if not restaurant_ids:
         return {"orders": [], "message": f"No restaurants found in {partner.city} - {partner.area}"}
 
-    # Fix: Only confirmed/preparing orders, not assigned, from matching restaurants
+    # Show confirmed, preparing AND ready orders — delivery partner can pick up any of these
+    from app.models.orders import Order, OrderStatus
     orders = db.query(Order).filter(
-        Order.status.in_([OrderStatus.CONFIRMED, OrderStatus.PREPARING]),
+        Order.status.in_([OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY]),
         Order.delivery_partner_id == None,
         Order.restaurant_id.in_(restaurant_ids)
     ).order_by(Order.created_at.asc()).all()

@@ -805,3 +805,38 @@ async def mark_payout_paid(
         "paid_at": paid_time.isoformat(),
         "deliveries_count": len(pending)
     }
+
+
+# ── Admin Live Order Tracking ──────────────────────────────────────────────
+
+@router.get("/live-orders")
+async def get_live_orders(
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Get all active orders with delivery partner info for admin tracking"""
+    get_admin_from_token(authorization, db)
+    from app.models.orders import Order, OrderStatus
+    from app.models.delivery_partner import DeliveryPartner
+    from app.models.restaurant_application import RestaurantApplication
+
+    # Active orders — not pending, not delivered, not cancelled
+    active_orders = db.query(Order).filter(
+        Order.status.in_([
+            OrderStatus.CONFIRMED, OrderStatus.PREPARING,
+            OrderStatus.READY, OrderStatus.OUT_FOR_DELIVERY
+        ])
+    ).order_by(Order.created_at.desc()).all()
+
+    result = []
+    for order in active_orders:
+        d = order.to_dict()
+        if order.delivery_partner_id:
+            partner = db.query(DeliveryPartner).filter(DeliveryPartner.id == order.delivery_partner_id).first()
+            if partner:
+                d["delivery_partner_name"] = partner.name
+                d["delivery_partner_phone"] = partner.phone
+                d["delivery_partner_upi"] = partner.upi_id
+        result.append(d)
+
+    return {"orders": result, "total": len(result)}
