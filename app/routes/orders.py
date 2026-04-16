@@ -191,6 +191,15 @@ async def create_order(
                     "items": [item.to_dict() for item in order.order_items],
                     "created_at": order.created_at.isoformat() if order.created_at else None
                 })
+                # Also notify delivery partners that a new order is available
+                await manager.broadcast_to_delivery_partners({
+                    "type": "new_order",
+                    "order_id": order.id,
+                    "order_number": order.order_number,
+                    "restaurant_name": order.restaurant_name,
+                    "total_amount": order.total_amount,
+                    "payment_method": order.payment_method,
+                })
         
         return {
             "message": "Order placed successfully",
@@ -392,10 +401,9 @@ async def update_order_status(
             "order": order.to_dict()
         })
 
-        # When READY — notify delivery partners via restaurant-dashboard channel
-        # Delivery partner dashboard listens to ws/restaurant-dashboard/{restaurant_id}
+        # When READY — notify delivery partners via channel 0 (delivery partner dashboard)
         if new_status == OrderStatus.READY:
-            await manager.send_restaurant_notification(order.restaurant_id, {
+            await manager.broadcast_to_delivery_partners({
                 "type": "order_ready_for_pickup",
                 "order_id": order.id,
                 "order_number": order.order_number,
@@ -404,6 +412,17 @@ async def update_order_status(
                 "payment_method": order.payment_method,
                 "delivery_address": order.delivery_address,
                 "items": [item.to_dict() for item in order.order_items]
+            })
+
+        # When PREPARING — also notify delivery partners (new order available)
+        if new_status == OrderStatus.PREPARING:
+            await manager.broadcast_to_delivery_partners({
+                "type": "new_order",
+                "order_id": order.id,
+                "order_number": order.order_number,
+                "restaurant_name": order.restaurant_name,
+                "total_amount": order.total_amount,
+                "payment_method": order.payment_method,
             })
         
         return {

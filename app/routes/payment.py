@@ -661,6 +661,19 @@ async def verify_razorpay_payment(
         except Exception as e:
             print(f"⚠️ Failed to send real-time notification: {e}")
             # Don't fail the payment if notification fails
+
+        # Also notify delivery partners that a new order is available
+        try:
+            await manager.broadcast_to_delivery_partners({
+                "type": "new_order",
+                "order_id": order.id,
+                "order_number": order.order_number,
+                "restaurant_name": order.restaurant_name,
+                "total_amount": float(order.total_amount),
+                "payment_method": order.payment_method,
+            })
+        except Exception as e:
+            print(f"⚠️ Failed to notify delivery partners: {e}")
         
         return {
             "success": True,

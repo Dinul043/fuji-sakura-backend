@@ -391,23 +391,34 @@ async def accept_order(order_id: int, authorization: str = FastAPIHeader(None), 
     db.commit()
     db.refresh(order)
 
+    # Build enriched order dict with partner info
+    order_dict = order.to_dict()
+    order_dict["delivery_partner_name"] = partner.name
+    order_dict["delivery_partner_phone"] = partner.phone
+
     # Notify user via WebSocket
     await manager.send_order_update(order_id, {
         "type": "order_status_update",
         "order_id": order_id,
         "status": "out_for_delivery",
-        "order": order.to_dict()
+        "order": order_dict
     })
 
-    # Notify restaurant that order was picked up
-    await manager.send_restaurant_notification(order.restaurant_id, {
+    # Notify restaurant that order was picked up (direct status update, not wrapped as new_order)
+    await manager.send_restaurant_status_update(order.restaurant_id, {
         "type": "order_status_update",
         "order_id": order.id,
         "status": "out_for_delivery",
-        "order": order.to_dict()
+        "order": order_dict
     })
 
-    return {"message": "Order accepted", "order": order.to_dict()}
+    # Remove this order from available orders list for all other delivery partners
+    await manager.broadcast_to_delivery_partners({
+        "type": "order_taken",
+        "order_id": order.id
+    })
+
+    return {"message": "Order accepted", "order": order_dict}
 
 
 @router.put("/complete-order/{order_id}")
@@ -433,41 +444,46 @@ async def complete_order(order_id: int, authorization: str = FastAPIHeader(None)
     db.commit()
     db.refresh(order)
 
-    # Record earnings — Fix 2: duplication protection, Fix 3: COD logic, Fix 5: config fee
+    # Record earnings — dedup protection, COD logic, fixed fee
     from app.models.delivery_partner import DeliveryEarning
-    DELIVERY_FEE = 40.00  # Fix 5: easy to change
+    DELIVERY_FEE = 40.00
 
     existing_earning = db.query(DeliveryEarning).filter(DeliveryEarning.order_id == order.id).first()
-    if not existing_earning:  # Fix 2: skip if already recorded
-        is_cod = order.payment_method and order.payment_method.lower() == 'cod'  # Fix 3: only COD orders
+    if not existing_earning:
+        is_cod = order.payment_method and order.payment_method.lower() == 'cod'
         earning = DeliveryEarning(
             partner_id=partner.id,
             order_id=order.id,
             amount=DELIVERY_FEE,
             payment_type="cod" if is_cod else "online",
-            cod_amount=float(order.total_amount) if is_cod else 0.00,  # Fix 3: only set for COD
+            cod_amount=float(order.total_amount) if is_cod else 0.00,
             status="pending"
         )
         db.add(earning)
         db.commit()
+
+    # Build enriched order dict with partner info
+    order_dict = order.to_dict()
+    order_dict["delivery_partner_name"] = partner.name
+    order_dict["delivery_partner_phone"] = partner.phone
 
     # Notify user via WebSocket
     await manager.send_order_update(order_id, {
         "type": "order_status_update",
         "order_id": order_id,
         "status": "delivered",
-        "order": order.to_dict()
+        "order": order_dict
     })
 
-    # Notify restaurant that order was delivered
-    await manager.send_restaurant_notification(order.restaurant_id, {
+    # Notify restaurant that order was delivered (direct status update)
+    await manager.send_restaurant_status_update(order.restaurant_id, {
         "type": "order_status_update",
         "order_id": order.id,
         "status": "delivered",
-        "order": order.to_dict()
+        "order": order_dict
     })
 
-    return {"message": "Order marked as delivered", "order": order.to_dict()}
+    return {"message": "Order marked as delivered", "order": order_dict}
 
 
 @router.get("/active-order")

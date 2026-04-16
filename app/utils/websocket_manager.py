@@ -120,7 +120,9 @@ class ConnectionManager:
     
     async def send_restaurant_notification(self, restaurant_id: int, notification_data: dict):
         """
-        Send new order notification to specific restaurant dashboard
+        Send new order notification to specific restaurant dashboard.
+        Wraps data as {"event": "new_order", "data": ...} for new orders.
+        For status updates, use send_restaurant_status_update instead.
         """
         if restaurant_id in self.restaurant_connections:
             disconnected = set()
@@ -142,6 +144,41 @@ class ConnectionManager:
                 self.restaurant_connections[restaurant_id].discard(connection)
         else:
             print(f"⚠️ No active connections for restaurant {restaurant_id}")
+
+    async def send_restaurant_status_update(self, restaurant_id: int, message: dict):
+        """
+        Send order status update directly to restaurant dashboard (no wrapping).
+        Used when delivery partner accepts/delivers an order.
+        """
+        if restaurant_id in self.restaurant_connections:
+            disconnected = set()
+            for connection in self.restaurant_connections[restaurant_id]:
+                try:
+                    await connection.send_json(message)
+                    print(f"📤 Sent status update to restaurant {restaurant_id}: {message.get('status')}")
+                except Exception as e:
+                    print(f"❌ Failed to send status update: {e}")
+                    disconnected.add(connection)
+            for connection in disconnected:
+                self.restaurant_connections[restaurant_id].discard(connection)
+        else:
+            print(f"⚠️ No active connections for restaurant {restaurant_id}")
+
+    async def broadcast_to_delivery_partners(self, message: dict):
+        """
+        Broadcast a message to all connected delivery partner dashboards.
+        Delivery partners connect on restaurant_id=0 channel.
+        """
+        if 0 in self.restaurant_connections:
+            disconnected = set()
+            for connection in self.restaurant_connections[0]:
+                try:
+                    await connection.send_json(message)
+                except Exception as e:
+                    print(f"❌ Failed to send to delivery partner: {e}")
+                    disconnected.add(connection)
+            for connection in disconnected:
+                self.restaurant_connections[0].discard(connection)
 
 # Global instance
 manager = ConnectionManager()
