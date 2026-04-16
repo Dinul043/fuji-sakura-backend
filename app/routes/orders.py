@@ -384,6 +384,20 @@ async def update_order_status(
             "status": new_status.value,
             "order": order.to_dict()
         })
+
+        # When READY — notify delivery partners via restaurant-dashboard channel
+        # Delivery partner dashboard listens to ws/restaurant-dashboard/{restaurant_id}
+        if new_status == OrderStatus.READY:
+            await manager.send_restaurant_notification(order.restaurant_id, {
+                "type": "order_ready_for_pickup",
+                "order_id": order.id,
+                "order_number": order.order_number,
+                "restaurant_name": order.restaurant_name,
+                "total_amount": order.total_amount,
+                "payment_method": order.payment_method,
+                "delivery_address": order.delivery_address,
+                "items": [item.to_dict() for item in order.order_items]
+            })
         
         return {
             "success": True,

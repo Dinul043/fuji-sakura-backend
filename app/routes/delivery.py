@@ -381,7 +381,7 @@ async def accept_order(order_id: int, authorization: str = FastAPIHeader(None), 
         raise HTTPException(status_code=404, detail="Order not found")
     if order.delivery_partner_id is not None:
         raise HTTPException(status_code=409, detail="Order already accepted by another partner")
-    if order.status not in [OrderStatus.CONFIRMED, OrderStatus.PREPARING]:
+    if order.status not in [OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY]:
         raise HTTPException(status_code=400, detail="Order is not available for pickup")
 
     order.delivery_partner_id = partner.id
@@ -395,6 +395,14 @@ async def accept_order(order_id: int, authorization: str = FastAPIHeader(None), 
     await manager.send_order_update(order_id, {
         "type": "order_status_update",
         "order_id": order_id,
+        "status": "out_for_delivery",
+        "order": order.to_dict()
+    })
+
+    # Notify restaurant that order was picked up
+    await manager.send_restaurant_notification(order.restaurant_id, {
+        "type": "order_status_update",
+        "order_id": order.id,
         "status": "out_for_delivery",
         "order": order.to_dict()
     })
@@ -451,7 +459,29 @@ async def complete_order(order_id: int, authorization: str = FastAPIHeader(None)
         "order": order.to_dict()
     })
 
+    # Notify restaurant that order was delivered
+    await manager.send_restaurant_notification(order.restaurant_id, {
+        "type": "order_status_update",
+        "order_id": order.id,
+        "status": "delivered",
+        "order": order.to_dict()
+    })
+
     return {"message": "Order marked as delivered", "order": order.to_dict()}
+
+
+@router.get("/active-order")
+def get_active_order(authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
+    """Get delivery partner's current active order (out_for_delivery)"""
+    from app.models.orders import Order, OrderStatus
+    partner = get_delivery_partner_from_header(authorization, db)
+    order = db.query(Order).filter(
+        Order.delivery_partner_id == partner.id,
+        Order.status == OrderStatus.OUT_FOR_DELIVERY
+    ).first()
+    if not order:
+        return {"order": None}
+    return {"order": order.to_dict()}
 
 
 @router.get("/my-orders")
