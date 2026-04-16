@@ -472,15 +472,22 @@ async def complete_order(order_id: int, authorization: str = FastAPIHeader(None)
 
 @router.get("/active-order")
 def get_active_order(authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
-    """Get delivery partner's current active order (out_for_delivery)"""
+    """Get delivery partner's current active order (out_for_delivery or ready with partner assigned)"""
     from app.models.orders import Order, OrderStatus
     partner = get_delivery_partner_from_header(authorization, db)
+    # Check both OUT_FOR_DELIVERY and READY (in case status update failed)
     order = db.query(Order).filter(
         Order.delivery_partner_id == partner.id,
-        Order.status == OrderStatus.OUT_FOR_DELIVERY
+        Order.status.in_([OrderStatus.OUT_FOR_DELIVERY, OrderStatus.READY])
     ).first()
     if not order:
         return {"order": None}
+    # If READY with partner assigned, fix status to OUT_FOR_DELIVERY
+    if order.status == OrderStatus.READY:
+        order.status = OrderStatus.OUT_FOR_DELIVERY
+        order.updated_at = datetime.now()
+        db.commit()
+        db.refresh(order)
     return {"order": order.to_dict()}
 
 

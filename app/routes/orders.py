@@ -80,8 +80,15 @@ async def create_order(
             total_amount = subtotal + delivery_fee + tax_amount
             
             # Generate order number
-            order_count = db.query(Order).count()
-            order_number = f"ORD-{datetime.now().year}-{order_count + 1:06d}"
+            # Generate unique order number using max ID to avoid duplicates after deletions
+            from sqlalchemy import func
+            max_id = db.query(func.max(Order.id)).scalar() or 0
+            order_number = f"ORD-{datetime.now().year}-{max_id + 1:06d}"
+            # Ensure uniqueness — if somehow still duplicate, add timestamp
+            existing = db.query(Order).filter(Order.order_number == order_number).first()
+            if existing:
+                import time
+                order_number = f"ORD-{datetime.now().year}-{int(time.time()) % 1000000:06d}"
             
             # Format delivery address
             addr = request.delivery_address
