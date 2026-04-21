@@ -75,7 +75,7 @@ async def create_order(
 
             # Calculate totals
             subtotal = sum(item.total_price for item in items)
-            delivery_fee = 2.99
+            delivery_fee = 40.00  # Fixed delivery fee — paid to delivery partner
             tax_amount = subtotal * 0.08
             total_amount = subtotal + delivery_fee + tax_amount
             
@@ -466,7 +466,7 @@ async def cancel_order(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Cancel an order (only if not yet preparing)"""
+    """Cancel an order — only within 1 minute of placement and only if CONFIRMED"""
     try:
         order = db.query(Order).filter(
             Order.id == order_id,
@@ -479,16 +479,50 @@ async def cancel_order(
                 detail="Order not found"
             )
         
-        # Check if order can be cancelled
-        if order.status not in [OrderStatus.PENDING, OrderStatus.CONFIRMED]:
+        # Only CONFIRMED orders can be cancelled by user
+        if order.status not in [OrderStatus.CONFIRMED]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Order cannot be cancelled at this stage"
             )
         
+        # Enforce 1-minute cancellation window from order creation
+        if order.created_at:
+            elapsed_seconds = (datetime.now() - order.created_at).total_seconds()
+            if elapsed_seconds > 60:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cancellation window has expired. Orders can only be cancelled within 1 minute of placement."
+                )
+        
         order.status = OrderStatus.CANCELLED
         db.commit()
         db.refresh(order)
+        
+        # Notify restaurant via WebSocket
+        await manager.send_restaurant_status_update(order.restaurant_id, {
+            "type": "order_status_update",
+            "order_id": order.id,
+            "status": "cancelled",
+            "order": order.to_dict()
+        })
+        
+        # Notify delivery partner if one was assigned
+        if order.delivery_partner_id:
+            await manager.broadcast_to_delivery_partners({
+                "type": "order_cancelled",
+                "order_id": order.id,
+                "order_number": order.order_number,
+                "message": "Order was cancelled by the customer"
+            })
+        
+        # Notify user tracking page
+        await manager.send_order_update(order_id, {
+            "type": "order_status_update",
+            "order_id": order_id,
+            "status": "cancelled",
+            "order": order.to_dict()
+        })
         
         return {
             "message": "Order cancelled successfully",
