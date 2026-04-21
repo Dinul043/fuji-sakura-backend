@@ -727,13 +727,13 @@ async def get_delivery_payouts(
         earnings = db.query(DeliveryEarning).filter(DeliveryEarning.partner_id == p.id).all()
         pending = [e for e in earnings if e.status == "pending"]
         paid = [e for e in earnings if e.status == "paid"]
-        # Fix 3: COD tracked separately — only for display, not part of payout
-        cod_collected = [e for e in earnings if e.payment_type == "cod" and float(e.cod_amount) > 0]
+        # COD tracked separately — only pending COD matters for settlement
+        cod_collected = [e for e in pending if e.payment_type == "cod" and float(e.cod_amount) > 0]
 
         pending_payout = float(sum(e.amount for e in pending))
         cod_total = float(sum(e.cod_amount for e in cod_collected))
-        # Fix 4: net_settlement — positive = company owes partner, negative = partner owes company
-        net_settlement = pending_payout - cod_total
+        # net COD to return = COD collected − delivery earnings (what partner owes company)
+        net_cod_to_return = max(0.0, cod_total - pending_payout)
 
         result.append({
             "id": p.id,
@@ -746,8 +746,9 @@ async def get_delivery_payouts(
             "total_deliveries": len(earnings),
             "pending_deliveries": len(pending),
             "pending_payout": pending_payout,           # company → partner (₹40 per delivery)
-            "cod_collected_by_partner": cod_total,      # partner → company (cash from customers)
-            "net_settlement": round(net_settlement, 2), # Fix 4: net amount
+            "cod_collected_by_partner": cod_total,      # raw COD cash collected (pending only)
+            "net_cod_to_return": round(net_cod_to_return, 2),  # what partner must return to company
+            "net_settlement": round(pending_payout - net_cod_to_return, 2),  # net to pay partner after COD return
             "total_paid": float(sum(e.amount for e in paid)),
             "is_available": bool(p.is_available)
         })
@@ -840,3 +841,40 @@ async def get_live_orders(
         result.append(d)
 
     return {"orders": result, "total": len(result)}
+
+
+@router.get("/delivery-partner/{partner_id}/cod-settlements")
+async def get_partner_cod_settlements(
+    partner_id: int,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Get COD settlement history for a specific delivery partner — admin only"""
+    get_admin_from_token(authorization, db)
+    from app.models.cod_settlement import CodSettlement
+    from app.models.delivery_partner import DeliveryPartner
+    from app.routes.delivery import calculate_cod_due
+
+    partner = db.query(DeliveryPartner).filter(DeliveryPartner.id == partner_id).first()
+    if not partner:
+        raise HTTPException(status_code=404, detail="Partner not found")
+
+    settlements = db.query(CodSettlement).filter(
+        CodSettlement.partner_id == partner_id
+    ).order_by(CodSettlement.created_at.desc()).all()
+
+    current_cod_due = calculate_cod_due(partner_id, db)
+
+    return {
+        "partner": {
+            "id": partner.id,
+            "name": partner.name,
+            "email": partner.email,
+            "phone": partner.phone,
+            "upi_id": partner.upi_id
+        },
+        "current_cod_due": current_cod_due,
+        "is_blocked": current_cod_due >= 1500,
+        "settlements": [s.to_dict() for s in settlements],
+        "total_settled": sum(float(s.amount) for s in settlements if s.status.value == "paid")
+    }

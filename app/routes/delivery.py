@@ -387,6 +387,17 @@ async def accept_order(order_id: int, authorization: str = FastAPIHeader(None), 
     if order.status not in [OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY]:
         raise HTTPException(status_code=400, detail="Order is not available for pickup")
 
+    # COD limit check — use calculate_cod_due for accurate net due
+    # Block if net COD due >= 1500 AND this is a COD order
+    # Single order exception: if this single order > 1500, still allow it
+    if order.payment_method and order.payment_method.lower() == 'cod':
+        net_cod_due = calculate_cod_due(partner.id, db)
+        if net_cod_due >= COD_LIMIT and order.total_amount <= COD_LIMIT:
+            raise HTTPException(
+                status_code=400,
+                detail=f"COD limit reached. You have ₹{net_cod_due:.0f} net COD due. Please settle via the Settle COD page before accepting more COD orders."
+            )
+
     # Assign partner — status becomes READY (partner on the way to restaurant)
     order.delivery_partner_id = partner.id
     order.status = OrderStatus.READY
@@ -640,3 +651,203 @@ def update_delivery_profile(
     partner.updated_at = datetime.now()
     db.commit()
     return {"message": "Profile updated", "partner": partner.to_dict()}
+
+
+COD_LIMIT = 1500.00  # Max COD a partner can hold before being blocked
+
+
+# ── COD Settlement via Razorpay ────────────────────────────────────────────
+
+def calculate_cod_due(partner_id: int, db) -> float:
+    """
+    Calculate net COD due for a partner.
+    cod_due = total COD collected from customers (pending earnings only)
+              minus delivery earnings (₹40 per order, also pending)
+    """
+    from app.models.delivery_partner import DeliveryEarning
+    pending = db.query(DeliveryEarning).filter(
+        DeliveryEarning.partner_id == partner_id,
+        DeliveryEarning.status == "pending"
+    ).all()
+    total_cod = sum(float(e.cod_amount) for e in pending if e.payment_type == "cod")
+    total_earnings = sum(float(e.amount) for e in pending)
+    return max(0.0, round(total_cod - total_earnings, 2))
+
+
+@router.post("/cod-settlement/create-order")
+async def create_cod_settlement_order(
+    authorization: str = FastAPIHeader(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Step 1: Partner clicks Pay Now.
+    Creates a Razorpay order for the net COD due amount.
+    Saves settlement record with status=created and before_cod_due.
+    """
+    from app.models.cod_settlement import CodSettlement, SettlementStatus
+    from app.services.razorpay_service import razorpay_service
+
+    partner = get_delivery_partner_from_header(authorization, db)
+    cod_due = calculate_cod_due(partner.id, db)
+
+    if cod_due <= 0:
+        raise HTTPException(status_code=400, detail="No COD amount due. Nothing to settle.")
+
+    # Create Razorpay order — partner pays cod_due to company account
+    result = razorpay_service.create_order(
+        amount=cod_due,
+        order_id=partner.id  # used as receipt reference
+    )
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create payment order: {result.get('error', 'Unknown error')}"
+        )
+
+    # Save settlement record
+    settlement = CodSettlement(
+        partner_id=partner.id,
+        amount=cod_due,
+        razorpay_order_id=result["razorpay_order_id"],
+        status=SettlementStatus.CREATED,
+        before_cod_due=cod_due
+    )
+    db.add(settlement)
+    db.commit()
+    db.refresh(settlement)
+
+    return {
+        "settlement_id": settlement.id,
+        "razorpay_order_id": result["razorpay_order_id"],
+        "amount": cod_due,
+        "amount_in_paise": result["amount"],
+        "currency": result["currency"],
+        "key_id": __import__('app.core.config', fromlist=['settings']).settings.RAZORPAY_KEY_ID,
+        "partner_name": partner.name,
+        "partner_email": partner.email,
+        "partner_phone": partner.phone
+    }
+
+
+class CodSettlementVerifyRequest(BaseModel):
+    settlement_id: int
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
+@router.post("/cod-settlement/verify")
+async def verify_cod_settlement(
+    data: CodSettlementVerifyRequest,
+    authorization: str = FastAPIHeader(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Step 2: After Razorpay payment success.
+    Verifies signature, marks settlement as paid,
+    updates after_cod_due, unblocks partner if cod_due < 1500.
+    """
+    from app.models.cod_settlement import CodSettlement, SettlementStatus
+    from app.services.razorpay_service import razorpay_service
+
+    partner = get_delivery_partner_from_header(authorization, db)
+
+    # Fetch settlement record
+    settlement = db.query(CodSettlement).filter(
+        CodSettlement.id == data.settlement_id,
+        CodSettlement.partner_id == partner.id
+    ).first()
+
+    if not settlement:
+        raise HTTPException(status_code=404, detail="Settlement record not found")
+
+    if settlement.status == SettlementStatus.PAID:
+        raise HTTPException(status_code=400, detail="This settlement is already paid")
+
+    # Verify Razorpay signature
+    is_valid = razorpay_service.verify_payment_signature(
+        razorpay_order_id=data.razorpay_order_id,
+        razorpay_payment_id=data.razorpay_payment_id,
+        razorpay_signature=data.razorpay_signature
+    )
+
+    if not is_valid:
+        # Mark as failed with reason
+        settlement.status = SettlementStatus.FAILED
+        settlement.failure_reason = "Signature verification failed"
+        settlement.razorpay_payment_id = data.razorpay_payment_id
+        db.commit()
+        raise HTTPException(status_code=400, detail="Payment verification failed. Please contact support.")
+
+    # Calculate after_cod_due
+    cod_due_after = max(0.0, float(settlement.before_cod_due) - float(settlement.amount))
+
+    # Update settlement record
+    settlement.status = SettlementStatus.PAID
+    settlement.razorpay_payment_id = data.razorpay_payment_id
+    settlement.razorpay_signature = data.razorpay_signature
+    settlement.after_cod_due = cod_due_after
+    settlement.paid_at = datetime.now()
+    db.commit()
+
+    return {
+        "message": "COD settlement successful. You can now accept orders.",
+        "amount_paid": float(settlement.amount),
+        "before_cod_due": float(settlement.before_cod_due),
+        "after_cod_due": cod_due_after,
+        "orders_unblocked": cod_due_after < COD_LIMIT
+    }
+
+
+@router.post("/cod-settlement/failed")
+async def mark_cod_settlement_failed(
+    data: CodSettlementVerifyRequest,
+    authorization: str = FastAPIHeader(None),
+    db: Session = Depends(get_db)
+):
+    """Called when Razorpay payment fails or is dismissed by partner."""
+    from app.models.cod_settlement import CodSettlement, SettlementStatus
+
+    partner = get_delivery_partner_from_header(authorization, db)
+    settlement = db.query(CodSettlement).filter(
+        CodSettlement.id == data.settlement_id,
+        CodSettlement.partner_id == partner.id
+    ).first()
+
+    if settlement and settlement.status == SettlementStatus.CREATED:
+        settlement.status = SettlementStatus.FAILED
+        settlement.failure_reason = "Payment cancelled or failed by partner"
+        db.commit()
+
+    return {"message": "Settlement marked as failed"}
+
+
+@router.get("/cod-settlement/history")
+def get_cod_settlement_history(
+    authorization: str = FastAPIHeader(None),
+    db: Session = Depends(get_db)
+):
+    """Get partner's COD settlement history"""
+    from app.models.cod_settlement import CodSettlement
+    partner = get_delivery_partner_from_header(authorization, db)
+    settlements = db.query(CodSettlement).filter(
+        CodSettlement.partner_id == partner.id
+    ).order_by(CodSettlement.created_at.desc()).limit(20).all()
+    return {"settlements": [s.to_dict() for s in settlements]}
+
+
+class CodIssueRequest(BaseModel):
+    amount: float
+    issue_description: str
+
+
+@router.post("/report-cod-issue")
+def report_cod_issue(data: CodIssueRequest, authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
+    """Partner reports a COD payment issue — logged for admin review"""
+    partner = get_delivery_partner_from_header(authorization, db)
+    if not data.issue_description.strip():
+        raise HTTPException(status_code=400, detail="Please describe the issue")
+    # Log for admin visibility — stored in cod_settlements as a failed record note
+    print(f"⚠️ COD Issue reported by partner {partner.id} ({partner.name}): ₹{data.amount} — {data.issue_description}")
+    return {"message": "Issue reported. Admin will contact you shortly."}

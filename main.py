@@ -13,6 +13,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.routes import auth, restaurant, admin_auth, menu, cart, orders, websocket, payment, reviews, delivery
 from app.models import admin_token  # Register AdminToken model with SQLAlchemy
+from app.models import cod_settlement  # Register CodSettlement model
 
 # Create FastAPI application
 app = FastAPI(
