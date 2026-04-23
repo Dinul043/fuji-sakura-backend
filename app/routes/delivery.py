@@ -773,7 +773,39 @@ async def verify_cod_settlement(
     if not settlement:
         raise HTTPException(status_code=404, detail="Settlement record not found")
 
+    # Edge case 3: Backend update failed previously but payment went through
+    # If payment_id already exists on a CREATED settlement, it means verify was called before
+    # but DB update failed — re-process it safely
     if settlement.status == SettlementStatus.PAID:
+        # Edge case 1: Duplicate payment — same settlement paid twice
+        # Check if this is a different payment_id (second payment)
+        if settlement.razorpay_payment_id and settlement.razorpay_payment_id != data.razorpay_payment_id:
+            # Auto-refund the duplicate payment
+            refund_result = razorpay_service.refund_payment(
+                payment_id=data.razorpay_payment_id,
+                amount=float(settlement.amount)
+            )
+            refund_id = refund_result.get("refund", {}).get("id") if refund_result.get("success") else None
+            # Log the duplicate — store in a new failed settlement record
+            duplicate = CodSettlement(
+                partner_id=partner.id,
+                amount=settlement.amount,
+                razorpay_order_id=data.razorpay_order_id + "_dup",
+                razorpay_payment_id=data.razorpay_payment_id,
+                status=SettlementStatus.FAILED,
+                before_cod_due=settlement.before_cod_due,
+                failure_reason="Duplicate payment — auto-refunded",
+                refund_status="initiated" if refund_id else "failed",
+                refund_id=refund_id,
+                refund_reason="Duplicate payment detected"
+            )
+            db.add(duplicate)
+            db.commit()
+            return {
+                "message": "Duplicate payment detected. Refund has been initiated automatically.",
+                "refund_initiated": True,
+                "refund_id": refund_id
+            }
         raise HTTPException(status_code=400, detail="This settlement is already paid")
 
     # Verify Razorpay signature

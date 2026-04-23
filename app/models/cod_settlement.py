@@ -39,6 +39,12 @@ class CodSettlement(Base):
     # Failure tracking
     failure_reason = Column(String(500), nullable=True)
 
+    # Refund tracking
+    refund_status = Column(String(20), default="none", nullable=False)  # none / initiated / completed / failed
+    refund_id = Column(String(100), nullable=True)       # Razorpay refund ID
+    refund_reason = Column(String(500), nullable=True)   # why refund was triggered
+    refunded_at = Column(DateTime, nullable=True)
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.now)
     paid_at = Column(DateTime, nullable=True)
@@ -54,6 +60,10 @@ class CodSettlement(Base):
             "before_cod_due": float(self.before_cod_due),
             "after_cod_due": float(self.after_cod_due) if self.after_cod_due is not None else None,
             "failure_reason": self.failure_reason,
+            "refund_status": self.refund_status,
+            "refund_id": self.refund_id,
+            "refund_reason": self.refund_reason,
+            "refunded_at": self.refunded_at.isoformat() if self.refunded_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "paid_at": self.paid_at.isoformat() if self.paid_at else None,
         }

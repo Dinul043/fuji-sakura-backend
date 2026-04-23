@@ -887,3 +887,65 @@ async def get_partner_cod_settlements(
         "settlements": [s.to_dict() for s in settlements],
         "total_settled": sum(float(s.amount) for s in settlements if s.status.value == "paid")
     }
+
+
+class RefundSettlementRequest(BaseModel):
+    reason: str = "Manual refund by admin"
+
+
+@router.post("/cod-settlement/{settlement_id}/refund")
+async def refund_cod_settlement(
+    settlement_id: int,
+    data: RefundSettlementRequest,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Admin manually initiates a refund for a COD settlement.
+    Use cases:
+    - Incorrect amount was charged
+    - Payment successful but backend update failed
+    - Admin decides to reverse a settlement
+    """
+    get_admin_from_token(authorization, db)
+    from app.models.cod_settlement import CodSettlement, SettlementStatus
+    from app.services.razorpay_service import razorpay_service
+
+    settlement = db.query(CodSettlement).filter(CodSettlement.id == settlement_id).first()
+    if not settlement:
+        raise HTTPException(status_code=404, detail="Settlement not found")
+
+    if settlement.status != SettlementStatus.PAID:
+        raise HTTPException(status_code=400, detail="Only paid settlements can be refunded")
+
+    if settlement.refund_status in ("initiated", "completed"):
+        raise HTTPException(status_code=400, detail=f"Refund already {settlement.refund_status} for this settlement")
+
+    if not settlement.razorpay_payment_id:
+        raise HTTPException(status_code=400, detail="No Razorpay payment ID found — cannot process refund")
+
+    # Initiate refund via Razorpay
+    refund_result = razorpay_service.refund_payment(
+        payment_id=settlement.razorpay_payment_id,
+        amount=float(settlement.amount)
+    )
+
+    if refund_result.get("success"):
+        refund_id = refund_result["refund"].get("id")
+        settlement.refund_status = "initiated"
+        settlement.refund_id = refund_id
+        settlement.refund_reason = data.reason
+        settlement.refunded_at = datetime.now()
+        db.commit()
+        return {
+            "message": f"Refund of ₹{settlement.amount} initiated successfully",
+            "refund_id": refund_id,
+            "settlement_id": settlement_id,
+            "amount": float(settlement.amount)
+        }
+    else:
+        error = refund_result.get("error", "Unknown error")
+        settlement.refund_status = "failed"
+        settlement.refund_reason = f"Refund failed: {error}"
+        db.commit()
+        raise HTTPException(status_code=500, detail=f"Refund failed: {error}")
