@@ -735,6 +735,14 @@ async def get_delivery_payouts(
         # net COD to return = COD collected − delivery earnings (what partner owes company)
         net_cod_to_return = max(0.0, cod_total - pending_payout)
 
+        # Total settled by partner via Razorpay
+        from app.models.cod_settlement import CodSettlement
+        paid_settlements = db.query(CodSettlement).filter(
+            CodSettlement.partner_id == p.id,
+            CodSettlement.status == 'paid'
+        ).all()
+        total_settled_by_partner = float(sum(s.amount for s in paid_settlements))
+
         result.append({
             "id": p.id,
             "name": p.name,
@@ -745,10 +753,11 @@ async def get_delivery_payouts(
             "area": p.area,
             "total_deliveries": len(earnings),
             "pending_deliveries": len(pending),
-            "pending_payout": pending_payout,           # company → partner (₹40 per delivery)
-            "cod_collected_by_partner": cod_total,      # raw COD cash collected (pending only)
-            "net_cod_to_return": round(net_cod_to_return, 2),  # what partner must return to company
-            "net_settlement": round(pending_payout - net_cod_to_return, 2),  # net to pay partner after COD return
+            "pending_payout": pending_payout,
+            "cod_collected_by_partner": cod_total,
+            "net_cod_to_return": round(net_cod_to_return, 2),
+            "total_settled_by_partner": round(total_settled_by_partner, 2),
+            "net_settlement": round(pending_payout - net_cod_to_return, 2),
             "total_paid": float(sum(e.amount for e in paid)),
             "is_available": bool(p.is_available)
         })

@@ -693,6 +693,17 @@ async def create_cod_settlement_order(
     if cod_due <= 0:
         raise HTTPException(status_code=400, detail="No COD amount due. Nothing to settle.")
 
+    # Prevent duplicate: block if there's already a CREATED (pending) settlement
+    existing_pending = db.query(CodSettlement).filter(
+        CodSettlement.partner_id == partner.id,
+        CodSettlement.status == SettlementStatus.CREATED
+    ).first()
+    if existing_pending:
+        raise HTTPException(
+            status_code=400,
+            detail="You already have a pending settlement in progress. Complete or cancel it before starting a new one."
+        )
+
     # Create Razorpay order — partner pays cod_due to company account
     result = razorpay_service.create_order(
         amount=cod_due,
@@ -789,7 +800,32 @@ async def verify_cod_settlement(
     settlement.razorpay_signature = data.razorpay_signature
     settlement.after_cod_due = cod_due_after
     settlement.paid_at = datetime.now()
+
+    # KEY FIX: Mark pending COD earnings as settled so calculate_cod_due() returns 0
+    # This is what actually reduces the COD due in the system
+    from app.models.delivery_partner import DeliveryEarning
+    pending_cod_earnings = db.query(DeliveryEarning).filter(
+        DeliveryEarning.partner_id == partner.id,
+        DeliveryEarning.payment_type == "cod",
+        DeliveryEarning.status == "pending"
+    ).all()
+    settled_time = datetime.now()
+    for e in pending_cod_earnings:
+        e.cod_amount = 0.0  # Zero out the COD amount — partner has returned it
     db.commit()
+
+    # Notify admin dashboard via WebSocket that a settlement was made
+    try:
+        from app.utils.websocket_manager import manager
+        await manager.send_restaurant_notification(0, {
+            "type": "cod_settlement_paid",
+            "partner_id": partner.id,
+            "partner_name": partner.name,
+            "amount_paid": float(settlement.amount),
+            "after_cod_due": cod_due_after
+        })
+    except Exception:
+        pass  # WebSocket failure should not block the response
 
     return {
         "message": "COD settlement successful. You can now accept orders.",
@@ -803,6 +839,7 @@ async def verify_cod_settlement(
 @router.post("/cod-settlement/failed")
 async def mark_cod_settlement_failed(
     data: CodSettlementVerifyRequest,
+    reason: str = "Payment cancelled or failed by partner",
     authorization: str = FastAPIHeader(None),
     db: Session = Depends(get_db)
 ):
@@ -817,7 +854,9 @@ async def mark_cod_settlement_failed(
 
     if settlement and settlement.status == SettlementStatus.CREATED:
         settlement.status = SettlementStatus.FAILED
-        settlement.failure_reason = "Payment cancelled or failed by partner"
+        settlement.failure_reason = reason or "Payment cancelled or failed by partner"
+        if data.razorpay_payment_id:
+            settlement.razorpay_payment_id = data.razorpay_payment_id
         db.commit()
 
     return {"message": "Settlement marked as failed"}
