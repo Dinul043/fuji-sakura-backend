@@ -22,8 +22,8 @@ class Admin(Base):
     last_login = Column(DateTime, nullable=True)
     created_by = Column(Integer, nullable=True)
 
-    # Relationship
-    tokens = relationship("AdminToken", back_populates="admin", cascade="all, delete-orphan")  # ID of admin who created this admin
+    # Relationship — AdminToken imported here to ensure it's registered before mapper resolves
+    tokens = relationship("AdminToken", back_populates="admin", cascade="all, delete-orphan")
 
     @classmethod
     def create(cls, db: Session, email: str, name: str, password: str, 
@@ -89,3 +89,8 @@ class Admin(Base):
             'last_login': self.last_login.isoformat() if self.last_login else None,
             'created_by': self.created_by
         }
+
+
+# Import AdminToken after Admin class definition to avoid circular imports
+# This ensures SQLAlchemy can resolve the "AdminToken" string in the relationship
+from app.models.admin_token import AdminToken  # noqa: F401

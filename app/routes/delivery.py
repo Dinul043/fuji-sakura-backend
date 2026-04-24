@@ -693,16 +693,15 @@ async def create_cod_settlement_order(
     if cod_due <= 0:
         raise HTTPException(status_code=400, detail="No COD amount due. Nothing to settle.")
 
-    # Prevent duplicate: block if there's already a CREATED (pending) settlement
+    # If there's an existing CREATED (abandoned) settlement, expire it and allow a fresh one
     existing_pending = db.query(CodSettlement).filter(
         CodSettlement.partner_id == partner.id,
         CodSettlement.status == SettlementStatus.CREATED
     ).first()
     if existing_pending:
-        raise HTTPException(
-            status_code=400,
-            detail="You already have a pending settlement in progress. Complete or cancel it before starting a new one."
-        )
+        existing_pending.status = SettlementStatus.FAILED
+        existing_pending.failure_reason = "Expired — partner started a new settlement"
+        db.commit()
 
     # Create Razorpay order — partner pays cod_due to company account
     result = razorpay_service.create_order(
