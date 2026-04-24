@@ -389,6 +389,27 @@ async def update_order_status(
         # Update delivered_at if status is delivered
         if new_status == OrderStatus.DELIVERED:
             order.delivered_at = datetime.now()
+            # Auto-create restaurant payout record (dedup protected by unique order_id)
+            try:
+                from app.models.restaurant_payout import RestaurantPayout, PLATFORM_COMMISSION_RATE
+                existing_payout = db.query(RestaurantPayout).filter(
+                    RestaurantPayout.order_id == order.id
+                ).first()
+                if not existing_payout:
+                    commission_amount = round(order.subtotal * PLATFORM_COMMISSION_RATE / 100, 2)
+                    payout_amount = round(order.subtotal - commission_amount, 2)
+                    payout = RestaurantPayout(
+                        restaurant_id=order.restaurant_id,
+                        order_id=order.id,
+                        order_amount=order.subtotal,
+                        commission_rate=PLATFORM_COMMISSION_RATE,
+                        commission_amount=commission_amount,
+                        payout_amount=payout_amount,
+                        status="pending"
+                    )
+                    db.add(payout)
+            except Exception as e:
+                print(f"⚠️ Failed to create restaurant payout for order {order.id}: {e}")
         
         db.commit()
         db.refresh(order)
