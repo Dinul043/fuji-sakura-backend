@@ -949,3 +949,146 @@ async def refund_cod_settlement(
         settlement.refund_reason = f"Refund failed: {error}"
         db.commit()
         raise HTTPException(status_code=500, detail=f"Refund failed: {error}")
+
+
+# ── Restaurant Payout Tracking ─────────────────────────────────────────────
+
+@router.get("/restaurant-payouts")
+async def get_restaurant_payouts(
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all approved restaurants with payout summary.
+    Shows: total orders delivered, total owed, commission earned, pending payout.
+    """
+    get_admin_from_token(authorization, db)
+    from app.models.restaurant_payout import RestaurantPayout
+    from app.models.restaurant_application import RestaurantApplication, ApplicationStatus
+
+    restaurants = db.query(RestaurantApplication).filter(
+        RestaurantApplication.status == ApplicationStatus.APPROVED
+    ).all()
+
+    result = []
+    for r in restaurants:
+        payouts = db.query(RestaurantPayout).filter(
+            RestaurantPayout.restaurant_id == r.id
+        ).all()
+
+        pending = [p for p in payouts if p.status == "pending"]
+        paid = [p for p in payouts if p.status == "paid"]
+
+        total_pending_payout = round(float(sum(p.payout_amount for p in pending)), 2)
+        total_commission_earned = round(float(sum(p.commission_amount for p in payouts)), 2)
+        total_paid_out = round(float(sum(p.payout_amount for p in paid)), 2)
+        total_orders_delivered = len(payouts)
+
+        result.append({
+            "id": r.id,
+            "business_name": r.business_name,
+            "owner_name": r.owner_name,
+            "email": r.email,
+            "phone": r.phone,
+            "upi_id": getattr(r, 'upi_id', None),
+            "city": getattr(r, 'city', None),
+            "total_orders_delivered": total_orders_delivered,
+            "pending_orders": len(pending),
+            "total_pending_payout": total_pending_payout,      # what we owe restaurant
+            "total_commission_earned": total_commission_earned, # platform keeps this
+            "total_paid_out": total_paid_out,                  # already paid to restaurant
+        })
+
+    return {"restaurants": result, "total": len(result)}
+
+
+@router.get("/restaurant-payouts/{restaurant_id}")
+async def get_restaurant_payout_detail(
+    restaurant_id: int,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Get order-wise payout breakdown for a specific restaurant.
+    """
+    get_admin_from_token(authorization, db)
+    from app.models.restaurant_payout import RestaurantPayout
+    from app.models.restaurant_application import RestaurantApplication, ApplicationStatus
+
+    restaurant = db.query(RestaurantApplication).filter(
+        RestaurantApplication.id == restaurant_id,
+        RestaurantApplication.status == ApplicationStatus.APPROVED
+    ).first()
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+
+    payouts = db.query(RestaurantPayout).filter(
+        RestaurantPayout.restaurant_id == restaurant_id
+    ).order_by(RestaurantPayout.created_at.desc()).all()
+
+    pending = [p for p in payouts if p.status == "pending"]
+
+    return {
+        "restaurant": {
+            "id": restaurant.id,
+            "business_name": restaurant.business_name,
+            "owner_name": restaurant.owner_name,
+            "email": restaurant.email,
+            "phone": restaurant.phone,
+        },
+        "summary": {
+            "total_orders": len(payouts),
+            "pending_orders": len(pending),
+            "total_pending_payout": round(float(sum(p.payout_amount for p in pending)), 2),
+            "total_commission_earned": round(float(sum(p.commission_amount for p in payouts)), 2),
+        },
+        "payouts": [p.to_dict() for p in payouts]
+    }
+
+
+class RestaurantPayoutMarkPaidRequest(BaseModel):
+    notes: str = ""
+
+
+@router.put("/restaurant-payout/mark-paid/{restaurant_id}")
+async def mark_restaurant_payout_paid(
+    restaurant_id: int,
+    data: RestaurantPayoutMarkPaidRequest,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Mark all pending payouts for a restaurant as paid.
+    Admin confirms they have transferred the amount via UPI.
+    """
+    get_admin_from_token(authorization, db)
+    from app.models.restaurant_payout import RestaurantPayout
+    from app.models.restaurant_application import RestaurantApplication
+
+    restaurant = db.query(RestaurantApplication).filter(
+        RestaurantApplication.id == restaurant_id
+    ).first()
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+
+    pending = db.query(RestaurantPayout).filter(
+        RestaurantPayout.restaurant_id == restaurant_id,
+        RestaurantPayout.status == "pending"
+    ).all()
+
+    if not pending:
+        raise HTTPException(status_code=400, detail="No pending payouts for this restaurant")
+
+    total = round(float(sum(p.payout_amount for p in pending)), 2)
+    paid_time = datetime.now()
+    for p in pending:
+        p.status = "paid"
+        p.paid_at = paid_time
+    db.commit()
+
+    return {
+        "message": f"Marked {len(pending)} orders as paid for {restaurant.business_name}",
+        "amount_paid": total,
+        "orders_count": len(pending),
+        "paid_at": paid_time.isoformat()
+    }
