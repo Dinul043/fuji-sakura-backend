@@ -43,6 +43,7 @@ class RestaurantApplication(Base):
     cuisine_type = Column(String(100), nullable=False)
     city = Column(String(100), nullable=True)   # e.g. Chennai
     area = Column(String(100), nullable=True)   # e.g. Karapakkam, Velachery
+    upi_id = Column(String(100), nullable=True)  # mandatory for receiving payouts from admin
     description = Column(Text, nullable=False)
     business_license = Column(String(255), nullable=False)
     food_permit = Column(String(255), nullable=False)
@@ -142,6 +143,7 @@ class RestaurantApplication(Base):
             'cuisine_type': self.cuisine_type,
             'city': self.city,
             'area': self.area,
+            'upi_id': self.upi_id,
             'description': self.description,
             'business_license': self.business_license,
             'food_permit': self.food_permit,

@@ -82,6 +82,7 @@ class DeliveryEarning(Base):
     amount = Column(Numeric(10, 2), nullable=False, default=40.00)  # fixed delivery fee ₹40
     payment_type = Column(String(20), nullable=False, default="online")  # online / cod
     cod_amount = Column(Numeric(10, 2), default=0.00)  # COD tracked separately — NOT part of payout
+    cod_settled = Column(Integer, default=0, nullable=False)  # 1 = partner has returned this COD to company
     status = Column(String(20), default="pending")  # pending / paid
     paid_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
@@ -94,6 +95,7 @@ class DeliveryEarning(Base):
             "amount": float(self.amount),
             "payment_type": self.payment_type,
             "cod_amount": float(self.cod_amount),
+            "cod_settled": bool(self.cod_settled),
             "status": self.status,
             "paid_at": self.paid_at.isoformat() if self.paid_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,

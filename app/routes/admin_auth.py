@@ -1084,6 +1084,7 @@ async def mark_restaurant_payout_paid(
     for p in pending:
         p.status = "paid"
         p.paid_at = paid_time
+        p.notes = data.notes.strip() if data.notes else None
     db.commit()
 
     return {

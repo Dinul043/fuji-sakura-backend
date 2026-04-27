@@ -28,6 +28,7 @@ class RestaurantPayout(Base):
 
     # Timestamps
     paid_at = Column(DateTime, nullable=True)
+    notes = Column(String(500), nullable=True)   # payment reference or admin notes
     created_at = Column(DateTime, default=datetime.now)
 
     def to_dict(self):
@@ -40,6 +41,7 @@ class RestaurantPayout(Base):
             "commission_amount": float(self.commission_amount),
             "payout_amount": float(self.payout_amount),
             "status": self.status,
+            "notes": self.notes,
             "paid_at": self.paid_at.isoformat() if self.paid_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
