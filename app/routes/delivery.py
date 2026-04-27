@@ -602,19 +602,35 @@ def get_my_orders(authorization: str = FastAPIHeader(None), db: Session = Depend
 
 @router.put("/mark-cod-collected/{order_id}")
 def mark_cod_collected(order_id: int, authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
-    """Mark COD amount as collected from customer"""
-    from app.models.orders import Order
+    """
+    Mark COD amount as collected from customer.
+    Also updates payments.payment_status and orders.payment_status to PAID.
+    """
+    from app.models.orders import Order, PaymentStatus as OrderPaymentStatus
+    from app.models.payment import Payment, PaymentStatus
+
     partner = get_delivery_partner_from_header(authorization, db)
     order = db.query(Order).filter(Order.id == order_id, Order.delivery_partner_id == partner.id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    # Fix 3: only allow for COD orders
     if not order.payment_method or order.payment_method.lower() != 'cod':
         raise HTTPException(status_code=400, detail="This is not a COD order")
+    if order.cod_collected:
+        return {"message": "COD already marked as collected"}
+
+    # Mark cash collected on order
     order.cod_collected = 1
+    order.payment_status = OrderPaymentStatus.PAID
     order.updated_at = datetime.now()
+
+    # Update payments table — mark COD payment as PAID
+    payment = db.query(Payment).filter(Payment.order_id == order.id).first()
+    if payment:
+        payment.payment_status = PaymentStatus.PAID
+        payment.updated_at = datetime.now()
+
     db.commit()
-    return {"message": "COD marked as collected"}
+    return {"message": "COD marked as collected", "payment_status": "PAID"}
 
 
 @router.get("/earnings")
