@@ -494,6 +494,13 @@ async def complete_order(order_id: int, authorization: str = FastAPIHeader(None)
     if order.status != OrderStatus.OUT_FOR_DELIVERY:
         raise HTTPException(status_code=400, detail="Please mark food as picked up before marking as delivered")
 
+    # Block delivery if COD order and cash not yet collected
+    if order.payment_method and order.payment_method.lower() == 'cod' and not order.cod_collected:
+        raise HTTPException(
+            status_code=400,
+            detail="Please mark cash as collected from customer before marking as delivered"
+        )
+
     order.status = OrderStatus.DELIVERED
     order.delivered_at = datetime.now()
     order.updated_at = datetime.now()
