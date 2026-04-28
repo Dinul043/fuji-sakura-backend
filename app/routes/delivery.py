@@ -652,7 +652,8 @@ def get_earnings(authorization: str = FastAPIHeader(None), db: Session = Depends
         "total_deliveries": len(all_earnings),
         "total_earnings": sum(float(e.amount) for e in all_earnings),
         "pending_payout": sum(float(e.amount) for e in pending),
-        "cod_to_submit": sum(float(e.cod_amount) for e in cod_pending),
+        # Only count unsettled COD (cod_settled = 0) — preserves history
+        "cod_to_submit": sum(float(e.cod_amount) for e in cod_pending if e.cod_settled == 0),
         "earnings": [e.to_dict() for e in all_earnings[-10:]]  # last 10
     }
 
@@ -707,15 +708,16 @@ COD_LIMIT = 1500.00  # Max COD a partner can hold before being blocked
 def calculate_cod_due(partner_id: int, db) -> float:
     """
     Calculate net COD due for a partner.
-    cod_due = total COD collected from customers (pending earnings only)
-              minus delivery earnings (₹40 per order, also pending)
+    cod_due = total COD collected (not yet settled) minus delivery earnings (pending)
+    Uses cod_settled = 0 filter to preserve original cod_amount history.
     """
     from app.models.delivery_partner import DeliveryEarning
     pending = db.query(DeliveryEarning).filter(
         DeliveryEarning.partner_id == partner_id,
         DeliveryEarning.status == "pending"
     ).all()
-    total_cod = sum(float(e.cod_amount) for e in pending if e.payment_type == "cod")
+    # Only count COD earnings where partner hasn't settled yet (cod_settled = 0)
+    total_cod = sum(float(e.cod_amount) for e in pending if e.payment_type == "cod" and e.cod_settled == 0)
     total_earnings = sum(float(e.amount) for e in pending)
     return max(0.0, round(total_cod - total_earnings, 2))
 
@@ -878,17 +880,17 @@ async def verify_cod_settlement(
     settlement.after_cod_due = cod_due_after
     settlement.paid_at = datetime.now()
 
-    # KEY FIX: Mark pending COD earnings as settled so calculate_cod_due() returns 0
-    # This is what actually reduces the COD due in the system
+    # Step 3.1 FIX: Set cod_settled = 1 instead of zeroing cod_amount
+    # This preserves the original COD amount history for audit purposes
     from app.models.delivery_partner import DeliveryEarning
     pending_cod_earnings = db.query(DeliveryEarning).filter(
         DeliveryEarning.partner_id == partner.id,
         DeliveryEarning.payment_type == "cod",
-        DeliveryEarning.status == "pending"
+        DeliveryEarning.status == "pending",
+        DeliveryEarning.cod_settled == 0
     ).all()
-    settled_time = datetime.now()
     for e in pending_cod_earnings:
-        e.cod_amount = 0.0  # Zero out the COD amount — partner has returned it
+        e.cod_settled = 1  # Mark as settled — original cod_amount preserved for history
     db.commit()
 
     # Notify admin dashboard via WebSocket that a settlement was made
