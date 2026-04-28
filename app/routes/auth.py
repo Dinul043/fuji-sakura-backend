@@ -54,10 +54,11 @@ class ResetPassword(BaseModel):
     newPassword: str
 
 class UpdateUserDetails(BaseModel):
-    email: str  # Temporarily changed from EmailStr to debug
+    email: str
     firstName: str
     lastName: str
     password: str
+    phone: Optional[str] = None
 
 class UserResponse(BaseModel):
     id: int
@@ -695,6 +696,8 @@ def update_user_details(user_data: UpdateUserDetails, db: Session = Depends(get_
         full_name = f"{user_data.firstName} {user_data.lastName}".strip()
         user.name = full_name
         user.password = get_password_hash(user_data.password.strip())
+        if user_data.phone:
+            user.phone = user_data.phone.strip()
         user.updated_at = datetime.now()
         
         db.commit()
