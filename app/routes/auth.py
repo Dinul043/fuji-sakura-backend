@@ -56,7 +56,7 @@ class ResetPassword(BaseModel):
 class UpdateUserDetails(BaseModel):
     email: str
     firstName: str
-    lastName: str
+    lastName: str = ""  # optional
     password: str
     phone: Optional[str] = None
 
