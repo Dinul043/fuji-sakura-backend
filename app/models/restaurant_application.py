@@ -44,6 +44,7 @@ class RestaurantApplication(Base):
     city = Column(String(100), nullable=True)   # e.g. Chennai
     area = Column(String(100), nullable=True)   # e.g. Karapakkam, Velachery
     upi_id = Column(String(100), nullable=True)  # mandatory for receiving payouts from admin
+    commission_rate = Column(Numeric(5, 2), nullable=False, default=10.00)  # platform commission %
     description = Column(Text, nullable=False)
     business_license = Column(String(255), nullable=False)
     food_permit = Column(String(255), nullable=False)
@@ -144,6 +145,7 @@ class RestaurantApplication(Base):
             'city': self.city,
             'area': self.area,
             'upi_id': self.upi_id,
+            'commission_rate': float(self.commission_rate) if self.commission_rate else 10.0,
             'description': self.description,
             'business_license': self.business_license,
             'food_permit': self.food_permit,

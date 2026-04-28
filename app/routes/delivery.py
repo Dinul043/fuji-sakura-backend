@@ -526,18 +526,23 @@ async def complete_order(order_id: int, authorization: str = FastAPIHeader(None)
 
     # Auto-create restaurant payout record — dedup protected by unique order_id
     try:
-        from app.models.restaurant_payout import RestaurantPayout, PLATFORM_COMMISSION_RATE
+        from app.models.restaurant_payout import RestaurantPayout
+        from app.models.restaurant_application import RestaurantApplication
         existing_payout = db.query(RestaurantPayout).filter(
             RestaurantPayout.order_id == order.id
         ).first()
         if not existing_payout:
-            commission_amount = round(order.subtotal * PLATFORM_COMMISSION_RATE / 100, 2)
+            restaurant = db.query(RestaurantApplication).filter(
+                RestaurantApplication.id == order.restaurant_id
+            ).first()
+            rate = float(restaurant.commission_rate) if restaurant and restaurant.commission_rate else 10.0
+            commission_amount = round(order.subtotal * rate / 100, 2)
             payout_amount = round(order.subtotal - commission_amount, 2)
             payout = RestaurantPayout(
                 restaurant_id=order.restaurant_id,
                 order_id=order.id,
                 order_amount=order.subtotal,
-                commission_rate=PLATFORM_COMMISSION_RATE,
+                commission_rate=rate,
                 commission_amount=commission_amount,
                 payout_amount=payout_amount,
                 status="pending"
