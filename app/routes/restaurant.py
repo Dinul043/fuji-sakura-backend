@@ -548,6 +548,9 @@ async def update_restaurant_profile(
                 "address": restaurant_app.address,
                 "cuisine_type": restaurant_app.cuisine_type,
                 "description": restaurant_app.description,
+                "upi_id": restaurant_app.upi_id,
+                "city": restaurant_app.city,
+                "area": restaurant_app.area,
                 "updated_at": restaurant_app.updated_at.isoformat() if restaurant_app.updated_at else None
             }
         }
