@@ -338,12 +338,15 @@ async def get_restaurant_profile(authorization: str = Header(None), db: Session 
             "email": restaurant_app.email,
             "phone": restaurant_app.phone,
             "address": restaurant_app.address,
+            "city": restaurant_app.city,
+            "area": restaurant_app.area,
+            "upi_id": restaurant_app.upi_id,
             "cuisine_type": restaurant_app.cuisine_type,
             "description": restaurant_app.description,
             "business_license": restaurant_app.business_license,
             "food_permit": restaurant_app.food_permit,
-            "restaurant_image": restaurant_app.restaurant_image,  # Add restaurant image field
-            "is_online": restaurant_app.is_online,  # Add online status
+            "restaurant_image": restaurant_app.restaurant_image,
+            "is_online": restaurant_app.is_online,
             "status": "approved",
             "created_at": restaurant_app.created_at.isoformat() if restaurant_app.created_at else None,
             "approved_at": restaurant_app.reviewed_at.isoformat() if restaurant_app.reviewed_at else None
@@ -508,8 +511,8 @@ async def update_restaurant_profile(
                 detail="Restaurant profile not found or not approved"
             )
         
-        # Update allowed fields
-        allowed_fields = ['business_name', 'owner_name', 'phone', 'address', 'cuisine_type', 'description']
+        # Update allowed fields — upi_id added for payout tracking
+        allowed_fields = ['business_name', 'owner_name', 'phone', 'address', 'cuisine_type', 'description', 'upi_id']
         
         for field in allowed_fields:
             if field in profile_data:
