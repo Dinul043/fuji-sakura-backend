@@ -218,6 +218,7 @@ async def update_application_status(
     new_status: str, 
     admin_notes: Optional[str] = None,
     reviewed_by: Optional[int] = None,
+    commission_rate: Optional[float] = None,
     db: Session = Depends(get_db)
 ):
     """Update restaurant application status (admin only)"""
@@ -253,6 +254,11 @@ async def update_application_status(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to update application status"
             )
+
+        # Save commission rate if provided
+        if commission_rate is not None and 0 <= commission_rate <= 50:
+            application.commission_rate = commission_rate
+            db.commit()
         
         # Send email notification if status changed
         if original_status != status_int:
