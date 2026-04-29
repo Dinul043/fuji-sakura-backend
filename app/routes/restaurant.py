@@ -1369,3 +1369,72 @@ async def update_commission_rate(
         "message": f"Commission rate updated to {commission_rate}% for {application.business_name}",
         "commission_rate": commission_rate
     }
+
+
+@router.get("/earnings")
+async def get_restaurant_earnings(authorization: str = Header(None), db: Session = Depends(get_db)):
+    """
+    Get restaurant earnings summary and order-wise payout breakdown.
+    Uses restaurant_payouts table.
+    """
+    try:
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authorization")
+
+        token = authorization.split(" ")[1]
+        from app.utils.security import verify_token
+        payload = verify_token(token)
+        if not payload:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+        restaurant_email = payload.get("sub")
+        restaurant = db.query(RestaurantApplication).filter(
+            RestaurantApplication.email == restaurant_email,
+            RestaurantApplication.status == 1
+        ).first()
+        if not restaurant:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Restaurant not found")
+
+        from app.models.restaurant_payout import RestaurantPayout
+        from app.models.orders import Order
+        from datetime import date
+
+        all_payouts = db.query(RestaurantPayout).filter(
+            RestaurantPayout.restaurant_id == restaurant.id
+        ).order_by(RestaurantPayout.created_at.desc()).all()
+
+        today = date.today()
+        today_payouts = [p for p in all_payouts if p.created_at and p.created_at.date() == today]
+        pending = [p for p in all_payouts if p.status == "pending"]
+        paid = [p for p in all_payouts if p.status == "paid"]
+
+        # Build order-wise list with order number
+        payout_list = []
+        for p in all_payouts:
+            order = db.query(Order).filter(Order.id == p.order_id).first()
+            payout_list.append({
+                **p.to_dict(),
+                "order_number": order.order_number if order else f"#{p.order_id}"
+            })
+
+        return {
+            "summary": {
+                "today_revenue": round(sum(float(p.order_amount) for p in today_payouts), 2),
+                "today_orders": len(today_payouts),
+                "total_revenue": round(sum(float(p.order_amount) for p in all_payouts), 2),
+                "total_orders": len(all_payouts),
+                "total_commission_paid": round(sum(float(p.commission_amount) for p in all_payouts), 2),
+                "pending_payout": round(sum(float(p.payout_amount) for p in pending), 2),
+                "pending_orders": len(pending),
+                "total_received": round(sum(float(p.payout_amount) for p in paid), 2),
+                "commission_rate": float(restaurant.commission_rate) if restaurant.commission_rate else 10.0,
+                "upi_id": restaurant.upi_id
+            },
+            "payouts": payout_list
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Get restaurant earnings error: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch earnings")
