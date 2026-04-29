@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import Optional
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, SmallInteger, Boolean
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, SmallInteger, Boolean, Numeric
 from sqlalchemy.orm import Session
 from app.core.database import Base, get_db
 
