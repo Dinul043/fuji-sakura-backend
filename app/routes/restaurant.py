@@ -1340,3 +1340,32 @@ async def restaurant_reset_password(
     db.commit()
 
     return {"message": "Password reset successfully. You can now login with your new password."}
+
+
+@router.put("/applications/{application_id}/commission-rate")
+async def update_commission_rate(
+    application_id: int,
+    commission_rate: float,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Update commission rate for an approved restaurant — admin only"""
+    # Validate range
+    if not (0 <= commission_rate <= 50):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Commission rate must be between 0 and 50"
+        )
+
+    application = RestaurantApplication.get_by_id(db, application_id)
+    if not application:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Restaurant not found")
+
+    application.commission_rate = commission_rate
+    application.updated_at = datetime.now()
+    db.commit()
+
+    return {
+        "message": f"Commission rate updated to {commission_rate}% for {application.business_name}",
+        "commission_rate": commission_rate
+    }
