@@ -314,8 +314,22 @@ def get_delivery_partner_from_header(authorization: str, db: Session) -> Deliver
 
 @router.put("/toggle-availability")
 def toggle_availability(authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
-    """Toggle delivery partner online/offline status"""
+    """Toggle delivery partner online/offline status. Blocks going offline with active order."""
+    from app.models.orders import Order, OrderStatus
     partner = get_delivery_partner_from_header(authorization, db)
+
+    # Block going offline if partner has an active order
+    if partner.is_available:
+        active = db.query(Order).filter(
+            Order.delivery_partner_id == partner.id,
+            Order.status.in_([OrderStatus.READY, OrderStatus.OUT_FOR_DELIVERY])
+        ).first()
+        if active:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot go offline — you have an active delivery in progress. Complete it first."
+            )
+
     partner.is_available = 0 if partner.is_available else 1
     partner.updated_at = datetime.now()
     db.commit()
