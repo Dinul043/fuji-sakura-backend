@@ -88,6 +88,24 @@ class Order(Base):
 
     def to_dict(self):
         """Convert order to dictionary for API responses"""
+        # Resolve delivery partner name/phone if assigned
+        partner_name = None
+        partner_phone = None
+        if self.delivery_partner_id:
+            try:
+                from app.models.delivery_partner import DeliveryPartner
+                from app.core.database import SessionLocal
+                db = SessionLocal()
+                partner = db.query(DeliveryPartner).filter(
+                    DeliveryPartner.id == self.delivery_partner_id
+                ).first()
+                if partner:
+                    partner_name = partner.name
+                    partner_phone = partner.phone
+                db.close()
+            except Exception:
+                pass
+
         return {
             "id": self.id,
             "order_number": self.order_number,
@@ -111,6 +129,8 @@ class Order(Base):
             "delivered_at": self.delivered_at.isoformat() if self.delivered_at else None,
             "accepted_at": self.accepted_at.isoformat() if self.accepted_at else None,
             "delivery_partner_id": self.delivery_partner_id,
+            "delivery_partner_name": partner_name,
+            "delivery_partner_phone": partner_phone,
             "cod_collected": bool(self.cod_collected),
             "items": [item.to_dict() for item in self.order_items] if self.order_items else []
         }
