@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from typing import Optional
 
 from app.core.database import get_db
 from app.models.admin import Admin
@@ -766,7 +767,7 @@ async def get_delivery_payouts(
 
 
 class PayoutRequest(BaseModel):
-    partner_id: int
+    partner_id: Optional[int] = None
     notes: str = ""
 
 
