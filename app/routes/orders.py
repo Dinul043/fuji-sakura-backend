@@ -439,17 +439,6 @@ async def update_order_status(
                 "delivery_address": order.delivery_address,
                 "items": [item.to_dict() for item in order.order_items]
             })
-
-        # When PREPARING — also notify delivery partners (new order available)
-        if new_status == OrderStatus.PREPARING:
-            await manager.broadcast_to_delivery_partners({
-                "type": "new_order",
-                "order_id": order.id,
-                "order_number": order.order_number,
-                "restaurant_name": order.restaurant_name,
-                "total_amount": order.total_amount,
-                "payment_method": order.payment_method,
-            })
         
         return {
             "success": True,
@@ -492,56 +481,69 @@ async def cancel_order(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Cancel an order — only within 1 minute of placement and only if CONFIRMED"""
+    """
+    User cancels order — only allowed while status is CONFIRMED.
+    Online payments are auto-refunded via Razorpay.
+    COD orders are simply cancelled.
+    """
     try:
         order = db.query(Order).filter(
             Order.id == order_id,
             Order.user_id == current_user.id
         ).first()
-        
+
         if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        # Status-based check — only CONFIRMED can be cancelled by user
+        if order.status != OrderStatus.CONFIRMED:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Order not found"
+                status_code=400,
+                detail="Order cannot be cancelled at this stage. The restaurant has already started preparing your food."
             )
-        
-        # Only CONFIRMED orders can be cancelled by user
-        if order.status not in [OrderStatus.CONFIRMED]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Order cannot be cancelled at this stage"
-            )
-        
-        # Enforce 1-minute cancellation window from order creation
-        if order.created_at:
-            elapsed_seconds = (datetime.now() - order.created_at).total_seconds()
-            if elapsed_seconds > 60:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Cancellation window has expired. Orders can only be cancelled within 1 minute of placement."
-                )
-        
+
+        # Mark cancelled with tracking fields
         order.status = OrderStatus.CANCELLED
+        order.cancelled_by = "user"
+        order.cancelled_at = datetime.now()
+        order.updated_at = datetime.now()
+
+        refund_initiated = False
+
+        # Auto-refund for online payments
+        if order.payment_method and order.payment_method.lower() == 'online':
+            try:
+                from app.models.payment import Payment, PaymentStatus
+                from app.services.razorpay_service import RazorpayService
+                payment = db.query(Payment).filter(
+                    Payment.order_id == order.id,
+                    Payment.payment_status == PaymentStatus.PAID
+                ).first()
+                if payment and payment.gateway_payment_id:
+                    razorpay = RazorpayService()
+                    refund = razorpay.refund_payment(
+                        payment_id=payment.gateway_payment_id,
+                        amount=int(order.total_amount * 100)
+                    )
+                    if refund:
+                        payment.payment_status = PaymentStatus.REFUNDED
+                        payment.failure_reason = "Order cancelled by customer — refund initiated"
+                        order.payment_status = PaymentStatus.REFUNDED
+                        refund_initiated = True
+            except Exception as e:
+                print(f"⚠️ Refund failed for order {order.id}: {e}")
+
         db.commit()
         db.refresh(order)
-        
-        # Notify restaurant via WebSocket
+
+        # Notify restaurant
         await manager.send_restaurant_status_update(order.restaurant_id, {
-            "type": "order_status_update",
+            "type": "order_cancelled",
             "order_id": order.id,
-            "status": "cancelled",
-            "order": order.to_dict()
+            "order_number": order.order_number,
+            "message": "Order was cancelled by the customer"
         })
-        
-        # Notify delivery partner if one was assigned
-        if order.delivery_partner_id:
-            await manager.broadcast_to_delivery_partners({
-                "type": "order_cancelled",
-                "order_id": order.id,
-                "order_number": order.order_number,
-                "message": "Order was cancelled by the customer"
-            })
-        
+
         # Notify user tracking page
         await manager.send_order_update(order_id, {
             "type": "order_status_update",
@@ -549,21 +551,19 @@ async def cancel_order(
             "status": "cancelled",
             "order": order.to_dict()
         })
-        
+
         return {
             "message": "Order cancelled successfully",
+            "refund_initiated": refund_initiated,
             "order": order.to_dict()
         }
-        
+
     except HTTPException:
         db.rollback()
         raise
     except Exception as e:
         db.rollback()
         print(f"❌ Error cancelling order: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to cancel order"
-        )
+        raise HTTPException(status_code=500, detail="Failed to cancel order")
     
     

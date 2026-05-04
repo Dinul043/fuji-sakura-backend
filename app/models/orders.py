@@ -76,6 +76,11 @@ class Order(Base):
     # Delivery partner assignment
     delivery_partner_id = Column(Integer, nullable=True)
     cod_collected = Column(Integer, default=0, nullable=True)  # 1 = COD collected by partner
+
+    # Cancellation tracking
+    cancelled_by = Column(String(20), nullable=True)   # 'user' or 'restaurant'
+    cancel_reason = Column(String(255), nullable=True)
+    cancelled_at = Column(DateTime, nullable=True)
     
     # Relationships
     user = relationship("User", back_populates="orders")
@@ -132,6 +137,9 @@ class Order(Base):
             "delivery_partner_name": partner_name,
             "delivery_partner_phone": partner_phone,
             "cod_collected": bool(self.cod_collected),
+            "cancelled_by": self.cancelled_by,
+            "cancel_reason": self.cancel_reason,
+            "cancelled_at": self.cancelled_at.isoformat() if self.cancelled_at else None,
             "items": [item.to_dict() for item in self.order_items] if self.order_items else []
         }
 

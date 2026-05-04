@@ -322,7 +322,7 @@ def toggle_availability(authorization: str = FastAPIHeader(None), db: Session = 
     if partner.is_available:
         active = db.query(Order).filter(
             Order.delivery_partner_id == partner.id,
-            Order.status.in_([OrderStatus.READY, OrderStatus.OUT_FOR_DELIVERY])
+            Order.status == OrderStatus.OUT_FOR_DELIVERY
         ).first()
         if active:
             raise HTTPException(
@@ -367,10 +367,10 @@ def get_available_orders(authorization: str = FastAPIHeader(None), db: Session =
     if not restaurant_ids:
         return {"orders": [], "message": f"No restaurants found in {partner.city} - {partner.area}"}
 
-    # Show confirmed, preparing AND ready orders — delivery partner can pick up any of these
+    # Show READY orders only — restaurant must mark food ready before partner can accept
     from app.models.orders import Order, OrderStatus
     orders = db.query(Order).filter(
-        Order.status.in_([OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY]),
+        Order.status == OrderStatus.READY,
         Order.delivery_partner_id == None,
         Order.restaurant_id.in_(restaurant_ids)
     ).order_by(Order.created_at.asc()).all()
@@ -398,8 +398,8 @@ async def accept_order(order_id: int, authorization: str = FastAPIHeader(None), 
         raise HTTPException(status_code=404, detail="Order not found")
     if order.delivery_partner_id is not None:
         raise HTTPException(status_code=409, detail="Order already accepted by another partner")
-    if order.status not in [OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY]:
-        raise HTTPException(status_code=400, detail="Order is not available for pickup")
+    if order.status != OrderStatus.READY:
+        raise HTTPException(status_code=400, detail="Order is not ready for pickup yet. Wait for the restaurant to prepare the food.")
 
     # COD limit check — use calculate_cod_due for accurate net due
     # Block if net COD due >= 1500 AND this is a COD order
@@ -412,9 +412,9 @@ async def accept_order(order_id: int, authorization: str = FastAPIHeader(None), 
                 detail=f"COD limit reached. You have ₹{net_cod_due:.0f} net COD due. Please settle via the Settle COD page before accepting more COD orders."
             )
 
-    # Assign partner — status becomes READY (partner on the way to restaurant)
+    # Assign partner — status becomes OUT_FOR_DELIVERY (partner heading to restaurant)
     order.delivery_partner_id = partner.id
-    order.status = OrderStatus.READY
+    order.status = OrderStatus.OUT_FOR_DELIVERY
     order.accepted_at = datetime.now()
     order.updated_at = datetime.now()
     db.commit()
@@ -424,11 +424,11 @@ async def accept_order(order_id: int, authorization: str = FastAPIHeader(None), 
     order_dict["delivery_partner_name"] = partner.name
     order_dict["delivery_partner_phone"] = partner.phone
 
-    # Notify restaurant — partner is on the way to pick up
+    # Notify restaurant — partner accepted, heading to pick up
     await manager.send_restaurant_status_update(order.restaurant_id, {
         "type": "order_status_update",
         "order_id": order.id,
-        "status": "ready",
+        "status": "out_for_delivery",
         "partner_on_the_way": True,
         "order": order_dict
     })
@@ -595,13 +595,13 @@ async def complete_order(order_id: int, authorization: str = FastAPIHeader(None)
 def get_active_order(authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
     """
     Get delivery partner's current active order.
-    Returns READY (heading to restaurant) or OUT_FOR_DELIVERY (heading to customer).
+    Returns OUT_FOR_DELIVERY only — partner is heading to customer.
     """
     from app.models.orders import Order, OrderStatus
     partner = get_delivery_partner_from_header(authorization, db)
     order = db.query(Order).filter(
         Order.delivery_partner_id == partner.id,
-        Order.status.in_([OrderStatus.READY, OrderStatus.OUT_FOR_DELIVERY])
+        Order.status == OrderStatus.OUT_FOR_DELIVERY
     ).first()
     if not order:
         return {"order": None}

@@ -1438,3 +1438,122 @@ async def get_restaurant_earnings(authorization: str = Header(None), db: Session
     except Exception as e:
         print(f"Get restaurant earnings error: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch earnings")
+
+
+class RestaurantCancelRequest(BaseModel):
+    order_id: int
+    cancel_reason: str = ""
+
+
+@router.post("/orders/{order_id}/cancel")
+async def restaurant_cancel_order(
+    order_id: int,
+    data: RestaurantCancelRequest,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Restaurant cancels an order.
+    Allowed only for CONFIRMED or PREPARING status.
+    Online payments are auto-refunded via Razorpay.
+    """
+    try:
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing authorization")
+
+        token = authorization.split(" ")[1]
+        from app.utils.security import verify_token
+        payload = verify_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+        restaurant_email = payload.get("sub")
+        restaurant = db.query(RestaurantApplication).filter(
+            RestaurantApplication.email == restaurant_email,
+            RestaurantApplication.status == 1
+        ).first()
+        if not restaurant:
+            raise HTTPException(status_code=404, detail="Restaurant not found")
+
+        from app.models.orders import Order, OrderStatus, PaymentStatus as OrderPaymentStatus
+        from datetime import datetime
+
+        order = db.query(Order).filter(
+            Order.id == order_id,
+            Order.restaurant_id == restaurant.id
+        ).first()
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        # Only CONFIRMED or PREPARING can be cancelled by restaurant
+        if order.status not in [OrderStatus.CONFIRMED, OrderStatus.PREPARING]:
+            raise HTTPException(
+                status_code=400,
+                detail="Order cannot be cancelled at this stage. It has already been marked ready or picked up."
+            )
+
+        order.status = OrderStatus.CANCELLED
+        order.cancelled_by = "restaurant"
+        order.cancel_reason = data.cancel_reason.strip() or None
+        order.cancelled_at = datetime.now()
+        order.updated_at = datetime.now()
+
+        refund_initiated = False
+
+        # Auto-refund for online payments
+        if order.payment_method and order.payment_method.lower() == 'online':
+            try:
+                from app.models.payment import Payment, PaymentStatus
+                from app.services.razorpay_service import RazorpayService
+                payment = db.query(Payment).filter(
+                    Payment.order_id == order.id,
+                    Payment.payment_status == PaymentStatus.PAID
+                ).first()
+                if payment and payment.gateway_payment_id:
+                    razorpay = RazorpayService()
+                    refund = razorpay.refund_payment(
+                        payment_id=payment.gateway_payment_id,
+                        amount=int(order.total_amount * 100)
+                    )
+                    if refund:
+                        payment.payment_status = PaymentStatus.REFUNDED
+                        payment.failure_reason = f"Order cancelled by restaurant — {data.cancel_reason or 'No reason given'}"
+                        order.payment_status = OrderPaymentStatus.REFUNDED
+                        refund_initiated = True
+            except Exception as e:
+                print(f"⚠️ Refund failed for order {order.id}: {e}")
+
+        db.commit()
+        db.refresh(order)
+
+        # Notify user via WebSocket
+        from app.utils.websocket_manager import manager
+        await manager.send_order_update(order_id, {
+            "type": "order_cancelled",
+            "order_id": order_id,
+            "order_number": order.order_number,
+            "message": f"Your order was cancelled by the restaurant. {data.cancel_reason or ''}".strip(),
+            "refund_initiated": refund_initiated
+        })
+
+        # Notify user tracking page status update
+        await manager.send_order_update(order_id, {
+            "type": "order_status_update",
+            "order_id": order_id,
+            "status": "cancelled",
+            "order": order.to_dict()
+        })
+
+        return {
+            "message": "Order cancelled successfully",
+            "refund_initiated": refund_initiated,
+            "order": order.to_dict()
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"Restaurant cancel order error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to cancel order")
