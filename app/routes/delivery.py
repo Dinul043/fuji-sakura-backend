@@ -748,18 +748,27 @@ COD_LIMIT = 1500.00  # Max COD a partner can hold before being blocked
 def calculate_cod_due(partner_id: int, db) -> float:
     """
     Calculate net COD due for a partner.
-    cod_due = total COD collected (not yet settled) minus delivery earnings (pending)
-    Uses cod_settled = 0 filter to preserve original cod_amount history.
+    cod_due = total COD collected from customers (all time) minus total already settled via Razorpay.
+    Delivery earnings are completely separate — they don't offset COD.
     """
     from app.models.delivery_partner import DeliveryEarning
-    pending = db.query(DeliveryEarning).filter(
+    from app.models.cod_settlement import CodSettlement
+
+    # Total COD collected from ALL deliveries (all time, regardless of earning status)
+    all_earnings = db.query(DeliveryEarning).filter(
         DeliveryEarning.partner_id == partner_id,
-        DeliveryEarning.status == "pending"
+        DeliveryEarning.payment_type == "cod"
     ).all()
-    # Only count COD earnings where partner hasn't settled yet (cod_settled = 0)
-    total_cod = sum(float(e.cod_amount) for e in pending if e.payment_type == "cod" and e.cod_settled == 0)
-    total_earnings = sum(float(e.amount) for e in pending)
-    return max(0.0, round(total_cod - total_earnings, 2))
+    total_cod_collected = sum(float(e.cod_amount) for e in all_earnings)
+
+    # Total already paid back via Razorpay
+    paid_settlements = db.query(CodSettlement).filter(
+        CodSettlement.partner_id == partner_id,
+        CodSettlement.status == 'paid'
+    ).all()
+    total_settled = sum(float(s.amount) for s in paid_settlements)
+
+    return max(0.0, round(total_cod_collected - total_settled, 2))
 
 
 @router.post("/cod-settlement/create-order")

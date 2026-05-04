@@ -788,35 +788,77 @@ async def mark_payout_paid(
     db: Session = Depends(get_db)
 ):
     """
-    Mark all pending earnings as paid.
-    Fix 2: paid_at timestamp records when payout happened (audit trail).
-    Fix 6: returns error if nothing to pay.
+    Mark all pending delivery earnings as paid to partner via UPI.
+    HARD BLOCK: Cannot pay if partner still has unsettled COD cash.
+    WebSocket: Notifies partner dashboard instantly after payment.
     """
     get_admin_from_token(authorization, db)
     from app.models.delivery_partner import DeliveryPartner, DeliveryEarning
+    from app.models.cod_settlement import CodSettlement
 
     partner = db.query(DeliveryPartner).filter(DeliveryPartner.id == partner_id).first()
     if not partner:
         raise HTTPException(status_code=404, detail="Delivery partner not found")
+
+    if not partner.upi_id:
+        raise HTTPException(status_code=400, detail="Partner has no UPI ID — cannot process payout")
 
     pending = db.query(DeliveryEarning).filter(
         DeliveryEarning.partner_id == partner_id,
         DeliveryEarning.status == "pending"
     ).all()
 
-    # Fix 6: safety check
     if not pending:
         raise HTTPException(status_code=400, detail="Nothing to pay — no pending earnings for this partner")
 
-    if not partner.upi_id:
-        raise HTTPException(status_code=400, detail="Partner has no UPI ID — cannot process payout")
+    # HARD BLOCK — check if partner still has unsettled COD cash
+    all_cod_earnings = db.query(DeliveryEarning).filter(
+        DeliveryEarning.partner_id == partner_id,
+        DeliveryEarning.payment_type == "cod"
+    ).all()
+    total_cod_collected = float(sum(e.cod_amount for e in all_cod_earnings))
 
+    paid_settlements = db.query(CodSettlement).filter(
+        CodSettlement.partner_id == partner_id,
+        CodSettlement.status == 'paid'
+    ).all()
+    total_settled = float(sum(s.amount for s in paid_settlements))
+
+    cod_still_pending = max(0.0, round(total_cod_collected - total_settled, 2))
+
+    if cod_still_pending > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot pay earnings — partner still has ₹{cod_still_pending:.2f} COD cash to return. Partner must settle COD first."
+        )
+
+    # Mark all pending earnings as paid
     total = sum(float(e.amount) for e in pending)
     paid_time = datetime.now()
     for e in pending:
         e.status = "paid"
-        e.paid_at = paid_time  # Fix 2: timestamp for audit trail
+        e.paid_at = paid_time
     db.commit()
+
+    # WebSocket — notify partner dashboard instantly
+    try:
+        from app.utils.websocket_manager import manager
+        # Broadcast to delivery partner channel (channel 0)
+        await manager.broadcast_to_delivery_partners({
+            "type": "payout_paid",
+            "partner_id": partner_id,
+            "amount_paid": round(total, 2),
+            "message": f"₹{round(total, 2)} delivery earnings paid to your UPI ({partner.upi_id})"
+        })
+        # Also notify admin channel for real-time refresh
+        await manager.send_restaurant_notification(0, {
+            "type": "payout_paid",
+            "partner_id": partner_id,
+            "partner_name": partner.name,
+            "amount_paid": round(total, 2)
+        })
+    except Exception as e:
+        print(f"⚠️ WebSocket notification failed: {e}")
 
     return {
         "message": f"Marked {len(pending)} deliveries as paid for {partner.name}",
