@@ -510,14 +510,14 @@ async def cancel_order(
 
         refund_initiated = False
 
-        # Auto-refund for online payments
+        # Auto-refund for online payments — duplicate prevention via payment_status check
         if order.payment_method and order.payment_method.lower() == 'online':
             try:
                 from app.models.payment import Payment, PaymentStatus
                 from app.services.razorpay_service import RazorpayService
                 payment = db.query(Payment).filter(
                     Payment.order_id == order.id,
-                    Payment.payment_status == PaymentStatus.PAID
+                    Payment.payment_status == PaymentStatus.PAID  # only if not already refunded
                 ).first()
                 if payment and payment.gateway_payment_id:
                     razorpay = RazorpayService()
@@ -530,6 +530,9 @@ async def cancel_order(
                         payment.failure_reason = "Order cancelled by customer — refund initiated"
                         order.payment_status = PaymentStatus.REFUNDED
                         refund_initiated = True
+                elif payment and payment.payment_status == PaymentStatus.REFUNDED:
+                    # Already refunded — don't refund again
+                    refund_initiated = True
             except Exception as e:
                 print(f"⚠️ Refund failed for order {order.id}: {e}")
 
