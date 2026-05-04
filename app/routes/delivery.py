@@ -433,6 +433,14 @@ async def accept_order(order_id: int, authorization: str = FastAPIHeader(None), 
         "order": order_dict
     })
 
+    # Notify user tracking page — order is now out for delivery
+    await manager.send_order_update(order.id, {
+        "type": "order_status_update",
+        "order_id": order.id,
+        "status": "out_for_delivery",
+        "order": order_dict
+    })
+
     # Remove from available list for all other delivery partners
     await manager.broadcast_to_delivery_partners({
         "type": "order_taken",
