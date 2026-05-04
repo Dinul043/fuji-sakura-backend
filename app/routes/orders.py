@@ -182,24 +182,22 @@ async def create_order(
         for order in created_orders:
             if order.payment_method and order.payment_method.lower() == 'cod':
                 await manager.send_restaurant_notification(order.restaurant_id, {
+                    "id": order.id,
                     "order_id": order.id,
                     "order_number": order.order_number,
                     "customer_name": order.customer_name,
+                    "customer_email": order.customer_email,
+                    "delivery_phone": order.delivery_phone,
+                    "delivery_address": order.delivery_address,
                     "total_amount": order.total_amount,
                     "payment_method": order.payment_method,
                     "special_instructions": order.special_instructions,
+                    "status": order.status.value,
                     "items": [item.to_dict() for item in order.order_items],
                     "created_at": order.created_at.isoformat() if order.created_at else None
                 })
-                # Also notify delivery partners that a new order is available
-                await manager.broadcast_to_delivery_partners({
-                    "type": "new_order",
-                    "order_id": order.id,
-                    "order_number": order.order_number,
-                    "restaurant_name": order.restaurant_name,
-                    "total_amount": order.total_amount,
-                    "payment_method": order.payment_method,
-                })
+                # NOTE: Do NOT notify delivery partners here.
+                # Partners only see orders when restaurant marks READY.
         
         return {
             "message": "Order placed successfully",

@@ -636,13 +636,17 @@ async def verify_razorpay_payment(
                 restaurant_id=order.restaurant_id,
                 notification_data={
                     "type": "new_order",
+                    "id": order.id,
                     "order_id": order.id,
                     "order_number": order.order_number,
                     "customer_name": order.customer_name,
-                    "customer_phone": order.delivery_phone,
+                    "customer_email": order.customer_email,
+                    "delivery_phone": order.delivery_phone,
                     "delivery_address": order.delivery_address,
                     "total_amount": float(order.total_amount),
                     "payment_method": order.payment_method,
+                    "special_instructions": order.special_instructions,
+                    "status": "confirmed",
                     "items_count": len(order_items),
                     "items": [
                         {
@@ -653,8 +657,7 @@ async def verify_razorpay_payment(
                         }
                         for item in order_items
                     ],
-                    "timestamp": datetime.now().isoformat(),
-                    "status": "confirmed"
+                    "created_at": datetime.now().isoformat()
                 }
             )
             print(f"✅ Real-time notification sent to restaurant {order.restaurant_id}")
@@ -662,18 +665,9 @@ async def verify_razorpay_payment(
             print(f"⚠️ Failed to send real-time notification: {e}")
             # Don't fail the payment if notification fails
 
-        # Also notify delivery partners that a new order is available
-        try:
-            await manager.broadcast_to_delivery_partners({
-                "type": "new_order",
-                "order_id": order.id,
-                "order_number": order.order_number,
-                "restaurant_name": order.restaurant_name,
-                "total_amount": float(order.total_amount),
-                "payment_method": order.payment_method,
-            })
-        except Exception as e:
-            print(f"⚠️ Failed to notify delivery partners: {e}")
+        # NOTE: Do NOT notify delivery partners here.
+        # Partners only see orders when restaurant marks READY (order_ready_for_pickup event).
+        # Sending new_order here causes premature notifications before food is prepared.
         
         return {
             "success": True,
