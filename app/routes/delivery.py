@@ -664,6 +664,7 @@ def mark_cod_collected(order_id: int, authorization: str = FastAPIHeader(None), 
 def get_earnings(authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
     """Get delivery partner earnings summary"""
     from app.models.delivery_partner import DeliveryEarning
+    from app.models.cod_settlement import CodSettlement
     from datetime import date
     partner = get_delivery_partner_from_header(authorization, db)
 
@@ -671,7 +672,20 @@ def get_earnings(authorization: str = FastAPIHeader(None), db: Session = Depends
     today = date.today()
     today_earnings = [e for e in all_earnings if e.created_at and e.created_at.date() == today]
     pending = [e for e in all_earnings if e.status == "pending"]
-    cod_pending = [e for e in pending if e.payment_type == "cod"]
+
+    # Total COD collected from ALL deliveries (not just pending)
+    all_cod = [e for e in all_earnings if e.payment_type == "cod"]
+    total_cod_collected = sum(float(e.cod_amount) for e in all_cod)
+
+    # Total already settled via Razorpay
+    paid_settlements = db.query(CodSettlement).filter(
+        CodSettlement.partner_id == partner.id,
+        CodSettlement.status == 'paid'
+    ).all()
+    total_settled = sum(float(s.amount) for s in paid_settlements)
+
+    # COD still to submit = total collected − already settled
+    cod_to_submit = max(0.0, round(total_cod_collected - total_settled, 2))
 
     return {
         "today_deliveries": len(today_earnings),
@@ -679,8 +693,7 @@ def get_earnings(authorization: str = FastAPIHeader(None), db: Session = Depends
         "total_deliveries": len(all_earnings),
         "total_earnings": sum(float(e.amount) for e in all_earnings),
         "pending_payout": sum(float(e.amount) for e in pending),
-        # Only count unsettled COD (cod_settled = 0) — preserves history
-        "cod_to_submit": sum(float(e.cod_amount) for e in cod_pending if e.cod_settled == 0),
+        "cod_to_submit": cod_to_submit,
         "earnings": [e.to_dict() for e in all_earnings[-10:]]  # last 10
     }
 

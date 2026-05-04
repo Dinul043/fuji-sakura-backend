@@ -726,23 +726,29 @@ async def get_delivery_payouts(
     result = []
     for p in partners:
         earnings = db.query(DeliveryEarning).filter(DeliveryEarning.partner_id == p.id).all()
-        pending = [e for e in earnings if e.status == "pending"]
-        paid = [e for e in earnings if e.status == "paid"]
-        # COD tracked separately — only pending COD matters for settlement
-        cod_collected = [e for e in pending if e.payment_type == "cod" and float(e.cod_amount) > 0]
+        pending_earnings = [e for e in earnings if e.status == "pending"]
+        paid_earnings   = [e for e in earnings if e.status == "paid"]
 
-        pending_payout = float(sum(e.amount for e in pending))
-        cod_total = float(sum(e.cod_amount for e in cod_collected))
-        # net COD to return = COD collected − delivery earnings (what partner owes company)
-        net_cod_to_return = max(0.0, cod_total - pending_payout)
+        # ── Delivery Earnings (company → partner) ──────────────────────────
+        # Pending = not yet paid by admin to partner
+        pending_payout = float(sum(e.amount for e in pending_earnings))
 
-        # Total settled by partner via Razorpay
+        # ── COD (partner → company) ─────────────────────────────────────────
+        # Total cash collected from customers across ALL deliveries (all time)
+        all_cod_earnings = [e for e in earnings if e.payment_type == "cod"]
+        cod_collected_total = float(sum(e.cod_amount for e in all_cod_earnings))
+
+        # Total already paid back by partner via Razorpay
         from app.models.cod_settlement import CodSettlement
         paid_settlements = db.query(CodSettlement).filter(
             CodSettlement.partner_id == p.id,
             CodSettlement.status == 'paid'
         ).all()
         total_settled_by_partner = float(sum(s.amount for s in paid_settlements))
+
+        # Still pending = total COD collected − total already settled
+        # These are completely independent of delivery earnings
+        cod_still_pending = max(0.0, round(cod_collected_total - total_settled_by_partner, 2))
 
         result.append({
             "id": p.id,
@@ -753,13 +759,16 @@ async def get_delivery_payouts(
             "city": p.city,
             "area": p.area,
             "total_deliveries": len(earnings),
-            "pending_deliveries": len(pending),
-            "pending_payout": pending_payout,
-            "cod_collected_by_partner": cod_total,
-            "net_cod_to_return": round(net_cod_to_return, 2),
+            "pending_deliveries": len(pending_earnings),
+            # Column 1: Delivery Earnings — company owes partner this
+            "pending_payout": round(pending_payout, 2),
+            # Column 2: COD Collected — total cash partner holds/held from customers
+            "cod_collected_by_partner": round(cod_collected_total, 2),
+            # Column 3: Platform Received — partner already paid back via Razorpay
             "total_settled_by_partner": round(total_settled_by_partner, 2),
-            "net_settlement": round(pending_payout - net_cod_to_return, 2),
-            "total_paid": float(sum(e.amount for e in paid)),
+            # Column 4: Still Pending — partner still owes company (COD − settled)
+            "net_cod_to_return": cod_still_pending,
+            "total_paid": float(sum(e.amount for e in paid_earnings)),
             "is_available": bool(p.is_available)
         })
 
