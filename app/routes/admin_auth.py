@@ -47,10 +47,10 @@ async def admin_login(login_data: AdminLogin, db: Session = Depends(get_db)):
         # Update last login
         admin.update_last_login(db)
         
-        # Create access token (valid for 8 hours for admins)
+        # Create access token (valid for 7 days — admin dashboard usage)
         access_token = create_access_token(
             data={"sub": admin.email, "admin_id": admin.id, "is_admin": True},
-            expires_delta=timedelta(hours=8)
+            expires_delta=timedelta(days=7)
         )
         
         return AdminLoginResponse(

@@ -657,8 +657,8 @@ async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Dep
         
         # No session restriction - multiple admins can login simultaneously
         
-        # Create access token with 8-hour expiry
-        expires_delta = timedelta(hours=8)
+        # Restaurant session: 7 days — dashboard stays open on tablet
+        expires_delta = timedelta(days=7)
         access_token = create_access_token(
             data={"sub": application.email, "type": "restaurant", "restaurant_id": application.id},
             expires_delta=expires_delta

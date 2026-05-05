@@ -143,7 +143,7 @@ def delivery_login(data: DeliveryLoginRequest, db: Session = Depends(get_db)):
 
     token = create_access_token(
         data={"sub": str(partner.id), "type": "delivery_partner"},
-        expires_delta=timedelta(hours=8)
+        expires_delta=timedelta(hours=24)
     )
 
     return {
