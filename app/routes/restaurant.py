@@ -1501,7 +1501,7 @@ async def restaurant_cancel_order(
         refund_initiated = False
 
         # Auto-refund for online payments — duplicate prevention via payment_status check
-        if order.payment_method and order.payment_method.lower() == 'online':
+        if order.payment_method and order.payment_method.upper() == 'ONLINE':
             try:
                 from app.models.payment import Payment, PaymentStatus
                 from app.services.razorpay_service import RazorpayService
