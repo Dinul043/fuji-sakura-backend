@@ -1513,9 +1513,9 @@ async def restaurant_cancel_order(
                     razorpay = RazorpayService()
                     refund = razorpay.refund_payment(
                         payment_id=payment.gateway_payment_id,
-                        amount=int(order.total_amount * 100)
+                        amount=order.total_amount  # pass in rupees, service converts to paise
                     )
-                    if refund:
+                    if refund and refund.get('success'):
                         payment.payment_status = PaymentStatus.REFUNDED
                         payment.failure_reason = f"Order cancelled by restaurant — {data.cancel_reason or 'No reason given'}"
                         order.payment_status = OrderPaymentStatus.REFUNDED

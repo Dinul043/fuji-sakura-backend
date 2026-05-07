@@ -521,9 +521,9 @@ async def cancel_order(
                     razorpay = RazorpayService()
                     refund = razorpay.refund_payment(
                         payment_id=payment.gateway_payment_id,
-                        amount=int(order.total_amount * 100)
+                        amount=order.total_amount  # pass in rupees, service converts to paise
                     )
-                    if refund:
+                    if refund and refund.get('success'):
                         payment.payment_status = PaymentStatus.REFUNDED
                         payment.failure_reason = "Order cancelled by customer — refund initiated"
                         order.payment_status = OrderPaymentStatus.REFUNDED  # use orders model enum
