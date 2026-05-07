@@ -10,19 +10,19 @@ from enum import Enum as PyEnum
 from app.core.database import Base
 
 class OrderStatus(PyEnum):
-    PENDING = "pending"
-    CONFIRMED = "confirmed"
-    PREPARING = "preparing"
-    READY = "ready"
-    OUT_FOR_DELIVERY = "out_for_delivery"
-    DELIVERED = "delivered"
-    CANCELLED = "cancelled"
+    PENDING = "PENDING"
+    CONFIRMED = "CONFIRMED"
+    PREPARING = "PREPARING"
+    READY = "READY"
+    OUT_FOR_DELIVERY = "OUT_FOR_DELIVERY"
+    DELIVERED = "DELIVERED"
+    CANCELLED = "CANCELLED"
 
 class PaymentStatus(PyEnum):
-    PENDING = "pending"
-    PAID = "paid"
-    FAILED = "failed"
-    REFUNDED = "refunded"
+    PENDING = "PENDING"
+    PAID = "PAID"
+    FAILED = "FAILED"
+    REFUNDED = "REFUNDED"
 
 class Order(Base):
     __tablename__ = "orders"
@@ -114,8 +114,8 @@ class Order(Base):
         return {
             "id": self.id,
             "order_number": self.order_number,
-            "status": self.status.value,
-            "payment_status": self.payment_status.value,
+            "status": self.status.value.lower(),
+            "payment_status": self.payment_status.value.lower(),
             "subtotal": self.subtotal,
             "delivery_fee": self.delivery_fee,
             "tax_amount": self.tax_amount,
