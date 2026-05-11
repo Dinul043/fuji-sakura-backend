@@ -130,22 +130,26 @@ class RazorpayService:
         
         Args:
             payment_id: Razorpay payment ID
-            amount: Amount to refund (None for full refund)
+            amount: Amount to refund in rupees (None for full refund)
             
         Returns:
             dict: Refund details
         """
         try:
+            # Amount must be integer paise for Razorpay
             data = {}
             if amount:
-                data['amount'] = int(amount * 100)  # Convert to paise
+                data['amount'] = int(round(amount * 100))  # Convert rupees to paise as integer
             
+            print(f"🔄 Initiating refund: payment_id={payment_id}, data={data}")
             refund = self.client.payment.refund(payment_id, data)
+            print(f"✅ Refund successful: {refund.get('id')}, status={refund.get('status')}")
             return {
                 "success": True,
                 "refund": refund
             }
         except Exception as e:
+            print(f"❌ Refund failed: payment_id={payment_id}, error={str(e)}")
             return {
                 "success": False,
                 "error": str(e)

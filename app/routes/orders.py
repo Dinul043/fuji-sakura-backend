@@ -513,25 +513,34 @@ async def cancel_order(
             try:
                 from app.models.payment import Payment, PaymentStatus
                 from app.services.razorpay_service import RazorpayService
+                from sqlalchemy import func as sqlfunc
+                # Find payment with a gateway_payment_id (means payment was completed)
+                # Don't filter by status — case mismatch between Python enum and DB
                 payment = db.query(Payment).filter(
                     Payment.order_id == order.id,
-                    Payment.payment_status == PaymentStatus.PAID
+                    Payment.gateway_payment_id != None
                 ).first()
                 if payment and payment.gateway_payment_id:
-                    razorpay = RazorpayService()
-                    refund = razorpay.refund_payment(
-                        payment_id=payment.gateway_payment_id,
-                        amount=order.total_amount  # pass in rupees, service converts to paise
-                    )
-                    if refund and refund.get('success'):
-                        payment.payment_status = PaymentStatus.REFUNDED
-                        payment.failure_reason = "Order cancelled by customer — refund initiated"
-                        order.payment_status = OrderPaymentStatus.REFUNDED  # use orders model enum
+                    # Check it's not already refunded (case-insensitive)
+                    already_refunded = str(payment.payment_status.value).upper() == 'REFUNDED'
+                    if already_refunded:
                         refund_initiated = True
-                elif payment and payment.payment_status == PaymentStatus.REFUNDED:
-                    refund_initiated = True  # already refunded
+                    else:
+                        razorpay = RazorpayService()
+                        refund = razorpay.refund_payment(
+                            payment_id=payment.gateway_payment_id,
+                            amount=order.total_amount
+                        )
+                        if refund and refund.get('success'):
+                            payment.payment_status = PaymentStatus.REFUNDED
+                            payment.failure_reason = "Order cancelled by customer — refund initiated"
+                            order.payment_status = OrderPaymentStatus.REFUNDED
+                            refund_initiated = True
+                            print(f"✅ Refund initiated for order {order.id}: {refund['refund'].get('id')}")
+                        else:
+                            print(f"⚠️ Refund failed for order {order.id}: {refund}")
             except Exception as e:
-                print(f"⚠️ Refund failed for order {order.id}: {e}")
+                print(f"⚠️ Refund exception for order {order.id}: {e}")
 
         db.commit()
         db.refresh(order)
