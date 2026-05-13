@@ -1267,4 +1267,24 @@ async def retry_refund(
     else:
         error = result.get('error', 'Unknown error')
         print(f"❌ Admin retry refund failed for order {order.order_number}: {error}")
+
+        # If Razorpay says "invalid request" it may mean already refunded on their side
+        # Check Razorpay directly to confirm
+        try:
+            razorpay2 = RazorpayService()
+            p_detail = razorpay2.client.payment.fetch(payment.gateway_payment_id)
+            if p_detail.get('amount_refunded', 0) > 0:
+                # Already refunded on Razorpay side — sync DB
+                payment.payment_status = PaymentStatus.REFUNDED
+                payment.failure_reason = "Refund confirmed via Razorpay payment check"
+                order.payment_status = PaymentStatus.REFUNDED
+                db.commit()
+                return {
+                    "message": f"Refund already processed by Razorpay — DB updated",
+                    "order_number": order.order_number,
+                    "amount": order.total_amount
+                }
+        except Exception:
+            pass
+
         raise HTTPException(status_code=500, detail=f"Refund failed: {error}")
