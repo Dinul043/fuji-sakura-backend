@@ -1207,3 +1207,64 @@ async def get_refunds(
             "total_processing_amount": round(total_processing, 2)
         }
     }
+
+@router.post("/orders/{order_id}/retry-refund")
+async def retry_refund(
+    order_id: int,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Admin manually retries a refund for a cancelled online order
+    where the automatic refund failed or was not processed.
+    """
+    get_admin_from_token(authorization, db)
+    from app.models.orders import Order, OrderStatus
+    from app.models.payment import Payment, PaymentStatus
+    from app.services.razorpay_service import RazorpayService
+
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if order.status != OrderStatus.CANCELLED:
+        raise HTTPException(status_code=400, detail="Order is not cancelled — refund not applicable")
+
+    if not order.payment_method or order.payment_method.upper() != 'ONLINE':
+        raise HTTPException(status_code=400, detail="This is a COD order — no refund needed")
+
+    payment = db.query(Payment).filter(
+        Payment.order_id == order.id,
+        Payment.gateway_payment_id != None
+    ).first()
+
+    if not payment:
+        raise HTTPException(status_code=404, detail="No payment record found for this order")
+
+    # Check if already refunded
+    if str(payment.payment_status.value).upper() == 'REFUNDED':
+        return {"message": "Already refunded", "status": "already_refunded"}
+
+    # Attempt refund
+    razorpay = RazorpayService()
+    result = razorpay.refund_payment(
+        payment_id=payment.gateway_payment_id,
+        amount=order.total_amount
+    )
+
+    if result.get('success'):
+        payment.payment_status = PaymentStatus.REFUNDED
+        payment.failure_reason = "Order cancelled — refund initiated by admin"
+        order.payment_status = PaymentStatus.REFUNDED
+        db.commit()
+        print(f"✅ Admin retry refund successful for order {order.order_number}: {result['refund'].get('id')}")
+        return {
+            "message": f"Refund of ₹{order.total_amount} initiated successfully",
+            "refund_id": result['refund'].get('id'),
+            "order_number": order.order_number,
+            "amount": order.total_amount
+        }
+    else:
+        error = result.get('error', 'Unknown error')
+        print(f"❌ Admin retry refund failed for order {order.order_number}: {error}")
+        raise HTTPException(status_code=500, detail=f"Refund failed: {error}")
