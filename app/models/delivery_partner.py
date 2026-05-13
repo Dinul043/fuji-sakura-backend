@@ -3,7 +3,7 @@ Delivery Partner model
 Phase 1 completed: DB tables created (delivery_partners, delivery_tokens)
 """
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Numeric
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 from datetime import datetime
@@ -24,6 +24,8 @@ class DeliveryPartner(Base):
     profile_image = Column(String(500), nullable=True)    # photo for identity verification
     city = Column(String(100), nullable=False)
     area = Column(String(100), nullable=True)   # locality/area within city
+    latitude = Column(Numeric(10, 8), nullable=True)   # GPS latitude from Nominatim
+    longitude = Column(Numeric(11, 8), nullable=True)  # GPS longitude from Nominatim
     upi_id = Column(String(100), nullable=True)  # mandatory before taking orders
     status = Column(Integer, default=0, nullable=False)  # 0=pending, 1=approved, 2=rejected
     is_available = Column(Integer, default=0, nullable=False)  # online/offline
@@ -49,6 +51,8 @@ class DeliveryPartner(Base):
             "profile_image": self.profile_image,
             "city": self.city,
             "area": self.area,
+            "latitude": float(self.latitude) if self.latitude is not None else None,
+            "longitude": float(self.longitude) if self.longitude is not None else None,
             "upi_id": self.upi_id,
             "status": self.status,
             "is_available": bool(self.is_available),

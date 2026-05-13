@@ -3,7 +3,7 @@ Orders model for managing customer orders
 Production-ready order management system
 """
 
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, Enum
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, Enum, Numeric
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from enum import Enum as PyEnum
@@ -48,6 +48,8 @@ class Order(Base):
     # Delivery information
     delivery_address = Column(Text, nullable=False)
     delivery_phone = Column(String(20), nullable=False)
+    delivery_latitude = Column(Numeric(10, 8), nullable=True)   # Customer delivery GPS latitude
+    delivery_longitude = Column(Numeric(11, 8), nullable=True)  # Customer delivery GPS longitude
     
     # Customer information (cached)
     customer_name = Column(String(255), nullable=False)
@@ -122,6 +124,8 @@ class Order(Base):
             "total_amount": self.total_amount,
             "delivery_address": self.delivery_address,
             "delivery_phone": self.delivery_phone,
+            "delivery_latitude": float(self.delivery_latitude) if self.delivery_latitude is not None else None,
+            "delivery_longitude": float(self.delivery_longitude) if self.delivery_longitude is not None else None,
             "customer_name": self.customer_name,
             "customer_email": self.customer_email,
             "restaurant_name": self.restaurant_name,

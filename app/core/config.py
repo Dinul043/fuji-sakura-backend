@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_SECRET: str = ""
     PAYMENT_MODE: str = "mock"  # "mock" or "razorpay"
 
+    # Geospatial / Delivery Radius Configuration
+    DEFAULT_DELIVERY_RADIUS_KM: float = 5.0   # Default radius for partner↔restaurant matching
+    MAX_DELIVERY_RADIUS_KM: float = 10.0      # Max radius for home page restaurant filtering
+
     class Config:
         env_file = ".env"
         case_sensitive = True

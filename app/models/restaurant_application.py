@@ -43,6 +43,8 @@ class RestaurantApplication(Base):
     cuisine_type = Column(String(100), nullable=False)
     city = Column(String(100), nullable=True)   # e.g. Chennai
     area = Column(String(100), nullable=True)   # e.g. Karapakkam, Velachery
+    latitude = Column(Numeric(10, 8), nullable=True)   # GPS latitude from Nominatim
+    longitude = Column(Numeric(11, 8), nullable=True)  # GPS longitude from Nominatim
     upi_id = Column(String(100), nullable=True)  # mandatory for receiving payouts from admin
     commission_rate = Column(Numeric(5, 2), nullable=False, default=10.00)  # platform commission %
     description = Column(Text, nullable=False)
@@ -144,6 +146,8 @@ class RestaurantApplication(Base):
             'cuisine_type': self.cuisine_type,
             'city': self.city,
             'area': self.area,
+            'latitude': float(self.latitude) if self.latitude is not None else None,
+            'longitude': float(self.longitude) if self.longitude is not None else None,
             'upi_id': self.upi_id,
             'commission_rate': float(self.commission_rate) if self.commission_rate else 10.0,
             'description': self.description,
