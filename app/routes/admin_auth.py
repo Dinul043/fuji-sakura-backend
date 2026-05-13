@@ -1145,3 +1145,65 @@ async def mark_restaurant_payout_paid(
         "orders_count": len(pending),
         "paid_at": paid_time.isoformat()
     }
+
+
+@router.get("/refunds")
+async def get_refunds(
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Get all cancelled online orders with refund status for admin"""
+    get_admin_from_token(authorization, db)
+    from app.models.orders import Order, OrderStatus
+    from app.models.payment import Payment, PaymentStatus
+
+    # Get all cancelled orders that were paid online
+    cancelled_orders = db.query(Order).filter(
+        Order.status == OrderStatus.CANCELLED,
+        Order.payment_method == 'online'
+    ).order_by(Order.cancelled_at.desc()).all()
+
+    result = []
+    for order in cancelled_orders:
+        payment = db.query(Payment).filter(Payment.order_id == order.id).first()
+        
+        refund_status = "not_applicable"
+        gateway_payment_id = None
+        
+        if payment:
+            gateway_payment_id = payment.gateway_payment_id
+            if payment.payment_status.value.upper() == 'REFUNDED':
+                refund_status = "refunded"
+            elif payment.payment_status.value.upper() == 'PAID' and payment.gateway_payment_id:
+                refund_status = "processing"
+            elif payment.payment_status.value.upper() == 'FAILED':
+                refund_status = "failed"
+        
+        result.append({
+            "order_id": order.id,
+            "order_number": order.order_number,
+            "customer_name": order.customer_name,
+            "customer_email": order.customer_email,
+            "restaurant_name": order.restaurant_name,
+            "total_amount": order.total_amount,
+            "cancelled_by": order.cancelled_by or "user",
+            "cancel_reason": order.cancel_reason,
+            "cancelled_at": order.cancelled_at.isoformat() if order.cancelled_at else order.updated_at.isoformat() if order.updated_at else None,
+            "refund_status": refund_status,
+            "gateway_payment_id": gateway_payment_id
+        })
+
+    # Summary stats
+    total_refunded = sum(r["total_amount"] for r in result if r["refund_status"] == "refunded")
+    total_processing = sum(r["total_amount"] for r in result if r["refund_status"] == "processing")
+
+    return {
+        "refunds": result,
+        "summary": {
+            "total_count": len(result),
+            "refunded_count": len([r for r in result if r["refund_status"] == "refunded"]),
+            "processing_count": len([r for r in result if r["refund_status"] == "processing"]),
+            "total_refunded_amount": round(total_refunded, 2),
+            "total_processing_amount": round(total_processing, 2)
+        }
+    }
