@@ -141,12 +141,12 @@ def delivery_login(data: DeliveryLoginRequest, db: Session = Depends(get_db)):
     partner.last_login = datetime.now()
     db.commit()
 
+    # Delivery: 1 hour access token, 24 hour refresh token
     token = create_access_token(
         data={"sub": str(partner.id), "type": "delivery_partner"},
-        expires_delta=timedelta(hours=24)
+        expires_delta=timedelta(hours=1)
     )
 
-    # Issue refresh token
     from app.utils.security import create_refresh_token_for_entity
     refresh_token = create_refresh_token_for_entity(
         entity_id=partner.id, role="delivery", db=db, expires_delta=timedelta(hours=24)

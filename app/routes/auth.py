@@ -413,21 +413,17 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
         # Note: updated_at should only change when profile data changes
         db.commit()
         
-        # Create access token with appropriate expiry
-        if login_data.rememberMe:
-            expires_delta = timedelta(days=30)
-        else:
-            expires_delta = timedelta(days=1)
-            
+        # Access token: 1 hour (refresh token handles session persistence)
         access_token = create_access_token(
             data={"sub": str(user.id)}, 
-            expires_delta=expires_delta
+            expires_delta=timedelta(hours=1)
         )
 
-        # Also issue refresh token (same expiry — ready for Phase 2 short-lived switch)
+        # Refresh token: long-lived based on rememberMe
         from app.utils.security import create_refresh_token_for_entity
+        refresh_expires = timedelta(days=30) if login_data.rememberMe else timedelta(days=1)
         refresh_token = create_refresh_token_for_entity(
-            entity_id=user.id, role="user", db=db, expires_delta=expires_delta
+            entity_id=user.id, role="user", db=db, expires_delta=refresh_expires
         )
 
         logger.info(f"✅ User logged in successfully: {login_data.email}")

@@ -657,17 +657,15 @@ async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Dep
         
         # No session restriction - multiple admins can login simultaneously
         
-        # Restaurant session: 7 days
-        expires_delta = timedelta(days=7)
+        # Restaurant: 1 hour access token, 7 day refresh token
         access_token = create_access_token(
             data={"sub": application.email, "type": "restaurant", "restaurant_id": application.id},
-            expires_delta=expires_delta
+            expires_delta=timedelta(hours=1)
         )
 
-        # Issue refresh token
         from app.utils.security import create_refresh_token_for_entity
         refresh_token = create_refresh_token_for_entity(
-            entity_id=application.id, role="restaurant", db=db, expires_delta=expires_delta
+            entity_id=application.id, role="restaurant", db=db, expires_delta=timedelta(days=7)
         )
 
         # Update last login time

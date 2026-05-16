@@ -47,13 +47,12 @@ async def admin_login(login_data: AdminLogin, db: Session = Depends(get_db)):
         # Update last login
         admin.update_last_login(db)
         
-        # Create access token (7 days)
+        # Admin: 1 hour access token, 7 day refresh token
         access_token = create_access_token(
             data={"sub": admin.email, "admin_id": admin.id, "is_admin": True},
-            expires_delta=timedelta(days=7)
+            expires_delta=timedelta(hours=1)
         )
 
-        # Issue refresh token
         from app.utils.security import create_refresh_token_for_entity
         refresh_token = create_refresh_token_for_entity(
             entity_id=admin.id, role="admin", db=db, expires_delta=timedelta(days=7)
