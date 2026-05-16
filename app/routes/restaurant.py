@@ -618,7 +618,7 @@ async def restaurant_logout(authorization: str = Header(None), db: Session = Dep
             detail="Logout failed"
         )
 
-@router.post("/login", response_model=RestaurantLoginResponse)
+@router.post("/login")
 async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Depends(get_db)):
     """Restaurant login endpoint"""
     try:
@@ -657,22 +657,29 @@ async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Dep
         
         # No session restriction - multiple admins can login simultaneously
         
-        # Restaurant session: 7 days — dashboard stays open on tablet
+        # Restaurant session: 7 days
         expires_delta = timedelta(days=7)
         access_token = create_access_token(
             data={"sub": application.email, "type": "restaurant", "restaurant_id": application.id},
             expires_delta=expires_delta
         )
 
+        # Issue refresh token
+        from app.utils.security import create_refresh_token_for_entity
+        refresh_token = create_refresh_token_for_entity(
+            entity_id=application.id, role="restaurant", db=db, expires_delta=expires_delta
+        )
+
         # Update last login time
         application.last_login = datetime.now()
         db.commit()
 
-        # Return login response
-        return RestaurantLoginResponse(
-            access_token=access_token,
-            token_type="bearer",
-            restaurant={
+        # Return login response (refresh_token is extra field — frontend can ignore it for now)
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "restaurant": {
                 "id": application.id,
                 "business_name": application.business_name,
                 "owner_name": application.owner_name,
@@ -683,7 +690,7 @@ async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Dep
                 "description": application.description,
                 "status": application.status
             }
-        )
+        }
         
     except HTTPException:
         raise

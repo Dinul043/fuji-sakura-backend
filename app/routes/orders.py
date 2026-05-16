@@ -324,7 +324,7 @@ async def update_order_status(
         
         # Validate status
         try:
-            new_status = OrderStatus(request.status)
+            new_status = OrderStatus(request.status.upper())
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

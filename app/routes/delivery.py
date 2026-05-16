@@ -146,8 +146,15 @@ def delivery_login(data: DeliveryLoginRequest, db: Session = Depends(get_db)):
         expires_delta=timedelta(hours=24)
     )
 
+    # Issue refresh token
+    from app.utils.security import create_refresh_token_for_entity
+    refresh_token = create_refresh_token_for_entity(
+        entity_id=partner.id, role="delivery", db=db, expires_delta=timedelta(hours=24)
+    )
+
     return {
         "access_token": token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
         "partner": {
             "id": partner.id,

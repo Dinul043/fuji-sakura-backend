@@ -89,3 +89,79 @@ async def get_current_user(
     return user
 
     
+
+
+# ── Refresh Token Utilities ────────────────────────────────────────────────
+
+def create_refresh_token_for_entity(entity_id: int, role: str, db, expires_delta) -> str:
+    """
+    Generate a secure refresh token, hash it, store in DB.
+    Revokes any existing active tokens for this entity+role (single session).
+    Returns the RAW token (sent to client).
+    """
+    from app.models.refresh_token import RefreshToken
+    from datetime import datetime
+
+    raw_token = RefreshToken.generate()
+    token_hash = RefreshToken.hash_token(raw_token)
+    expires_at = datetime.now() + expires_delta
+
+    # Revoke existing tokens for this entity+role
+    db.query(RefreshToken).filter(
+        RefreshToken.entity_id == entity_id,
+        RefreshToken.role == role,
+        RefreshToken.revoked == False
+    ).update({"revoked": True})
+
+    # Store new hashed token
+    refresh = RefreshToken(
+        entity_id=entity_id,
+        role=role,
+        token_hash=token_hash,
+        expires_at=expires_at
+    )
+    db.add(refresh)
+    db.commit()
+
+    return raw_token
+
+
+def verify_refresh_token_from_db(raw_token: str, role: str, db):
+    """
+    Verify a refresh token. Returns the DB record if valid.
+    Raises HTTPException if invalid/expired/revoked.
+    """
+    from app.models.refresh_token import RefreshToken
+    from datetime import datetime
+
+    token_hash = RefreshToken.hash_token(raw_token)
+    record = db.query(RefreshToken).filter(
+        RefreshToken.token_hash == token_hash,
+        RefreshToken.role == role
+    ).first()
+
+    if not record:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    if record.revoked:
+        raise HTTPException(status_code=401, detail="Refresh token has been revoked")
+    if datetime.now() >= record.expires_at:
+        raise HTTPException(status_code=401, detail="Refresh token has expired")
+
+    return record
+
+
+def revoke_refresh_token_in_db(raw_token: str, role: str, db) -> bool:
+    """Revoke a specific refresh token on logout."""
+    from app.models.refresh_token import RefreshToken
+
+    token_hash = RefreshToken.hash_token(raw_token)
+    record = db.query(RefreshToken).filter(
+        RefreshToken.token_hash == token_hash,
+        RefreshToken.role == role
+    ).first()
+
+    if record:
+        record.revoked = True
+        db.commit()
+        return True
+    return False

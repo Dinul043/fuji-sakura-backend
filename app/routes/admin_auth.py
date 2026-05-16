@@ -24,7 +24,7 @@ class AdminLoginResponse(BaseModel):
     token_type: str
     admin: dict
 
-@router.post("/login", response_model=AdminLoginResponse)
+@router.post("/login")
 async def admin_login(login_data: AdminLogin, db: Session = Depends(get_db)):
     """Admin login - separate from regular user login"""
     try:
@@ -47,17 +47,24 @@ async def admin_login(login_data: AdminLogin, db: Session = Depends(get_db)):
         # Update last login
         admin.update_last_login(db)
         
-        # Create access token (valid for 7 days — admin dashboard usage)
+        # Create access token (7 days)
         access_token = create_access_token(
             data={"sub": admin.email, "admin_id": admin.id, "is_admin": True},
             expires_delta=timedelta(days=7)
         )
-        
-        return AdminLoginResponse(
-            access_token=access_token,
-            token_type="bearer",
-            admin=admin.to_dict()
+
+        # Issue refresh token
+        from app.utils.security import create_refresh_token_for_entity
+        refresh_token = create_refresh_token_for_entity(
+            entity_id=admin.id, role="admin", db=db, expires_delta=timedelta(days=7)
         )
+
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "admin": admin.to_dict()
+        }
         
     except HTTPException:
         raise

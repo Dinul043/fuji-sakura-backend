@@ -415,23 +415,26 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
         
         # Create access token with appropriate expiry
         if login_data.rememberMe:
-            # Extended session: 30 days
             expires_delta = timedelta(days=30)
-            logger.info(f"🔒 Extended session (30 days) for {login_data.email}")
         else:
-            # Short session: 1 day
             expires_delta = timedelta(days=1)
-            logger.info(f"🔒 Short session (1 day) for {login_data.email}")
             
         access_token = create_access_token(
             data={"sub": str(user.id)}, 
             expires_delta=expires_delta
         )
-        
+
+        # Also issue refresh token (same expiry — ready for Phase 2 short-lived switch)
+        from app.utils.security import create_refresh_token_for_entity
+        refresh_token = create_refresh_token_for_entity(
+            entity_id=user.id, role="user", db=db, expires_delta=expires_delta
+        )
+
         logger.info(f"✅ User logged in successfully: {login_data.email}")
         
         return {
             "access_token": access_token,
+            "refresh_token": refresh_token,
             "token_type": "bearer",
             "user": {
                 "id": user.id,
@@ -830,3 +833,50 @@ async def upload_profile_image(
     db.commit()
 
     return {"profile_image": image_url}
+
+
+# ── Refresh Token Endpoint ─────────────────────────────────────────────────
+
+class UserRefreshRequest(BaseModel):
+    refresh_token: str
+
+@router.post("/refresh")
+def user_refresh_token(data: UserRefreshRequest, db: Session = Depends(get_db)):
+    """Exchange valid refresh token for new access + refresh token pair."""
+    from app.utils.security import verify_refresh_token_from_db, create_refresh_token_for_entity
+
+    record = verify_refresh_token_from_db(data.refresh_token, role="user", db=db)
+
+    user = db.query(User).filter(User.id == record.entity_id, User.is_active == True).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found or deactivated")
+
+    # New access token (same expiry as before)
+    remaining = record.expires_at - datetime.now()
+    access_expires = remaining if remaining.total_seconds() > 3600 else timedelta(days=1)
+
+    new_access_token = create_access_token(
+        data={"sub": str(user.id)},
+        expires_delta=access_expires
+    )
+
+    # Rotate refresh token
+    record.revoked = True
+    db.commit()
+    new_refresh_token = create_refresh_token_for_entity(
+        entity_id=user.id, role="user", db=db, expires_delta=access_expires
+    )
+
+    return {
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
+        "token_type": "bearer"
+    }
+
+
+@router.post("/logout")
+def user_logout(data: UserRefreshRequest, db: Session = Depends(get_db)):
+    """Revoke refresh token on logout."""
+    from app.utils.security import revoke_refresh_token_in_db
+    revoke_refresh_token_in_db(data.refresh_token, role="user", db=db)
+    return {"message": "Logged out successfully"}
