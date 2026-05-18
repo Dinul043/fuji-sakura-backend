@@ -83,7 +83,10 @@ class RestaurantApplicationResponse(BaseModel):
     business_license: str
     food_permit: str
     status: str
-    created_at: str
+    created_at: Optional[str] = None
+    
+    class Config:
+        extra = "ignore"
 
 class RestaurantLoginRequest(BaseModel):
     email: EmailStr
@@ -172,6 +175,30 @@ async def submit_restaurant_application(application_data: RestaurantApplicationR
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
+        )
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        # Catch DB constraint violations and other unexpected errors
+        error_msg = str(e)
+        print(f"Restaurant application error: {error_msg}")
+        
+        # Check for common DB constraint violations
+        if 'Duplicate entry' in error_msg or 'UNIQUE constraint' in error_msg or 'IntegrityError' in error_msg:
+            if 'email' in error_msg:
+                raise HTTPException(status_code=409, detail="This email is already registered. Please use a different email.")
+            elif 'phone' in error_msg:
+                raise HTTPException(status_code=409, detail="This phone number is already registered. Please use a different phone number.")
+            elif 'business_license' in error_msg:
+                raise HTTPException(status_code=409, detail="This business license is already registered. Please use a different license number.")
+            elif 'food_permit' in error_msg:
+                raise HTTPException(status_code=409, detail="This food permit is already registered. Please use a different permit number.")
+            else:
+                raise HTTPException(status_code=409, detail="Duplicate data found. Please check your details and try again.")
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to submit application. Please try again later."
         )
     except Exception as e:
         print(f"Restaurant application error: {e}")
