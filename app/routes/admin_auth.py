@@ -18,6 +18,7 @@ router = APIRouter()
 class AdminLogin(BaseModel):
     email: str
     password: str
+    rememberMe: bool = False
 
 class AdminLoginResponse(BaseModel):
     access_token: str
@@ -47,15 +48,16 @@ async def admin_login(login_data: AdminLogin, db: Session = Depends(get_db)):
         # Update last login
         admin.update_last_login(db)
         
-        # Admin: 1 hour access token, 7 day refresh token
+        # Admin: 1 hour access token, refresh based on rememberMe
         access_token = create_access_token(
             data={"sub": admin.email, "admin_id": admin.id, "is_admin": True},
             expires_delta=timedelta(hours=1)
         )
 
         from app.utils.security import create_refresh_token_for_entity
+        refresh_expires = timedelta(days=30) if login_data.rememberMe else timedelta(days=7)
         refresh_token = create_refresh_token_for_entity(
-            entity_id=admin.id, role="admin", db=db, expires_delta=timedelta(days=7)
+            entity_id=admin.id, role="admin", db=db, expires_delta=refresh_expires
         )
 
         return {
@@ -1294,3 +1296,34 @@ async def retry_refund(
             pass
 
         raise HTTPException(status_code=500, detail=f"Refund failed: {error}")
+
+
+# ── Admin Refresh Token ────────────────────────────────────────────────────
+
+class AdminRefreshRequest(BaseModel):
+    refresh_token: str
+
+@router.post("/refresh")
+def admin_refresh(data: AdminRefreshRequest, db: Session = Depends(get_db)):
+    """Exchange valid refresh token for new access + refresh token pair."""
+    from app.utils.security import verify_refresh_token_from_db, create_refresh_token_for_entity
+
+    record = verify_refresh_token_from_db(data.refresh_token, role="admin", db=db)
+
+    admin = db.query(Admin).filter(Admin.id == record.entity_id, Admin.is_active == True).first()
+    if not admin:
+        raise HTTPException(status_code=401, detail="Admin not found or deactivated")
+
+    new_access_token = create_access_token(
+        data={"sub": admin.email, "admin_id": admin.id, "is_admin": True},
+        expires_delta=timedelta(hours=1)
+    )
+
+    # Rotate: revoke old, issue new
+    record.revoked = True
+    db.commit()
+    new_refresh_token = create_refresh_token_for_entity(
+        entity_id=admin.id, role="admin", db=db, expires_delta=timedelta(days=7)
+    )
+
+    return {"access_token": new_access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}

@@ -88,6 +88,7 @@ class RestaurantApplicationResponse(BaseModel):
 class RestaurantLoginRequest(BaseModel):
     email: EmailStr
     password: str
+    rememberMe: bool = False
 
 class RestaurantLoginResponse(BaseModel):
     access_token: str
@@ -657,15 +658,16 @@ async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Dep
         
         # No session restriction - multiple admins can login simultaneously
         
-        # Restaurant: 1 hour access token, 7 day refresh token
+        # Restaurant: 1 hour access token, refresh based on rememberMe
         access_token = create_access_token(
             data={"sub": application.email, "type": "restaurant", "restaurant_id": application.id},
             expires_delta=timedelta(hours=1)
         )
 
         from app.utils.security import create_refresh_token_for_entity
+        refresh_expires = timedelta(days=30) if login_data.rememberMe else timedelta(days=7)
         refresh_token = create_refresh_token_for_entity(
-            entity_id=application.id, role="restaurant", db=db, expires_delta=timedelta(days=7)
+            entity_id=application.id, role="restaurant", db=db, expires_delta=refresh_expires
         )
 
         # Update last login time
@@ -1564,3 +1566,37 @@ async def restaurant_cancel_order(
         db.rollback()
         print(f"Restaurant cancel order error: {e}")
         raise HTTPException(status_code=500, detail="Failed to cancel order")
+
+
+# ── Restaurant Refresh Token ───────────────────────────────────────────────
+
+class RestaurantRefreshRequest(BaseModel):
+    refresh_token: str
+
+@router.post("/refresh")
+def restaurant_refresh(data: RestaurantRefreshRequest, db: Session = Depends(get_db)):
+    """Exchange valid refresh token for new access + refresh token pair."""
+    from app.utils.security import verify_refresh_token_from_db, create_refresh_token_for_entity
+
+    record = verify_refresh_token_from_db(data.refresh_token, role="restaurant", db=db)
+
+    restaurant = db.query(RestaurantApplication).filter(
+        RestaurantApplication.id == record.entity_id,
+        RestaurantApplication.status == 1
+    ).first()
+    if not restaurant:
+        raise HTTPException(status_code=401, detail="Restaurant not found or not approved")
+
+    new_access_token = create_access_token(
+        data={"sub": restaurant.email, "type": "restaurant", "restaurant_id": restaurant.id},
+        expires_delta=timedelta(hours=1)
+    )
+
+    # Rotate: revoke old, issue new
+    record.revoked = True
+    db.commit()
+    new_refresh_token = create_refresh_token_for_entity(
+        entity_id=restaurant.id, role="restaurant", db=db, expires_delta=timedelta(days=7)
+    )
+
+    return {"access_token": new_access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}

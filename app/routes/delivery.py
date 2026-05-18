@@ -113,6 +113,7 @@ async def apply_delivery_partner(data: DeliveryApplyRequest, db: Session = Depen
 class DeliveryLoginRequest(BaseModel):
     email: str
     password: str
+    rememberMe: bool = False
 
 
 @router.post("/login")
@@ -141,15 +142,16 @@ def delivery_login(data: DeliveryLoginRequest, db: Session = Depends(get_db)):
     partner.last_login = datetime.now()
     db.commit()
 
-    # Delivery: 1 hour access token, 24 hour refresh token
+    # Delivery: 1 hour access token, refresh based on rememberMe
     token = create_access_token(
         data={"sub": str(partner.id), "type": "delivery_partner"},
         expires_delta=timedelta(hours=1)
     )
 
     from app.utils.security import create_refresh_token_for_entity
+    refresh_expires = timedelta(days=7) if data.rememberMe else timedelta(hours=24)
     refresh_token = create_refresh_token_for_entity(
-        entity_id=partner.id, role="delivery", db=db, expires_delta=timedelta(hours=24)
+        entity_id=partner.id, role="delivery", db=db, expires_delta=refresh_expires
     )
 
     return {
@@ -1025,3 +1027,38 @@ def report_cod_issue(data: CodIssueRequest, authorization: str = FastAPIHeader(N
     # Log for admin visibility — stored in cod_settlements as a failed record note
     print(f"⚠️ COD Issue reported by partner {partner.id} ({partner.name}): ₹{data.amount} — {data.issue_description}")
     return {"message": "Issue reported. Admin will contact you shortly."}
+
+
+# ── Delivery Partner Refresh Token ─────────────────────────────────────────
+
+class DeliveryRefreshRequest(BaseModel):
+    refresh_token: str
+
+@router.post("/refresh")
+def delivery_refresh(data: DeliveryRefreshRequest, db: Session = Depends(get_db)):
+    """Exchange valid refresh token for new access + refresh token pair."""
+    from app.utils.security import verify_refresh_token_from_db, create_refresh_token_for_entity, create_access_token
+    from datetime import timedelta
+
+    record = verify_refresh_token_from_db(data.refresh_token, role="delivery", db=db)
+
+    partner = db.query(DeliveryPartner).filter(
+        DeliveryPartner.id == record.entity_id,
+        DeliveryPartner.status == 1
+    ).first()
+    if not partner:
+        raise HTTPException(status_code=401, detail="Delivery partner not found or not approved")
+
+    new_access_token = create_access_token(
+        data={"sub": str(partner.id), "type": "delivery_partner"},
+        expires_delta=timedelta(hours=1)
+    )
+
+    # Rotate: revoke old, issue new
+    record.revoked = True
+    db.commit()
+    new_refresh_token = create_refresh_token_for_entity(
+        entity_id=partner.id, role="delivery", db=db, expires_delta=timedelta(hours=24)
+    )
+
+    return {"access_token": new_access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
