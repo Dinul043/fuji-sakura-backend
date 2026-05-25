@@ -576,14 +576,13 @@ async def verify_razorpay_payment(
                 detail="Invalid payment signature"
             )
         
-        # Fetch payment details from Razorpay
+        # Fetch payment details from Razorpay (non-blocking — payment is already verified by signature)
         payment_details = razorpay_service.fetch_payment(request.razorpay_payment_id)
         
+        # Even if fetch fails, payment is valid (signature verified above)
+        # Just log the failure and continue
         if not payment_details["success"]:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to fetch payment details from Razorpay"
-            )
+            print(f"⚠️ Could not fetch payment details for {request.razorpay_payment_id}: {payment_details.get('error')}")
         
         # Update payment record
         payment.payment_status = PaymentStatus.PAID

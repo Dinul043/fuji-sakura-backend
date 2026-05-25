@@ -87,6 +87,15 @@ async def apply_delivery_partner(data: DeliveryApplyRequest, db: Session = Depen
         status=0,
         is_available=0
     )
+    
+    # Geocode the partner's city/area to get lat/lng
+    from app.utils.geocoding import geocode_address
+    location_query = f"{data.area.strip()}, {data.city.strip()}" if data.area.strip() else data.city.strip()
+    coords = geocode_address(location_query)
+    if coords:
+        partner.latitude = coords[0]
+        partner.longitude = coords[1]
+    
     db.add(partner)
     db.commit()
     db.refresh(partner)
@@ -345,17 +354,48 @@ def toggle_availability(authorization: str = FastAPIHeader(None), db: Session = 
     return {"is_available": bool(partner.is_available), "message": "Online" if partner.is_available else "Offline"}
 
 
+class LocationUpdateRequest(BaseModel):
+    latitude: float
+    longitude: float
+
+
+@router.put("/location")
+def update_partner_location(
+    data: LocationUpdateRequest,
+    authorization: str = FastAPIHeader(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Update delivery partner's live GPS location.
+    Called every 30 seconds while partner is online.
+    """
+    from app.utils.geocoding import validate_coordinates
+
+    partner = get_delivery_partner_from_header(authorization, db)
+
+    if not validate_coordinates(data.latitude, data.longitude):
+        raise HTTPException(status_code=400, detail="Invalid coordinates")
+
+    partner.live_latitude = data.latitude
+    partner.live_longitude = data.longitude
+    partner.location_updated_at = datetime.now()
+    db.commit()
+
+    return {"message": "Location updated", "latitude": data.latitude, "longitude": data.longitude}
+
+
 @router.get("/available-orders")
 def get_available_orders(authorization: str = FastAPIHeader(None), db: Session = Depends(get_db)):
     """
     Get orders available for pickup:
-    - Status: confirmed or preparing
+    - Status: READY
     - Not yet assigned to any delivery partner
-    - Filtered by partner's city (and area if set)
+    - Filtered by partner's live location (10km radius) OR city/area fallback
     - Partner must have UPI ID set
     """
     from app.models.orders import Order, OrderStatus
     from app.models.restaurant_application import RestaurantApplication
+    from app.utils.geocoding import haversine_distance, is_location_stale, DELIVERY_RADIUS_KM
     partner = get_delivery_partner_from_header(authorization, db)
 
     if not partner.is_available:
@@ -365,16 +405,50 @@ def get_available_orders(authorization: str = FastAPIHeader(None), db: Session =
     if not partner.upi_id:
         return {"orders": [], "message": "Please add your UPI ID in your profile before taking orders"}
 
-    # Fix: Always match city + area (both mandatory — no optional condition)
-    restaurant_query = db.query(RestaurantApplication.id).filter(
-        RestaurantApplication.city == partner.city,
-        RestaurantApplication.area == partner.area,
-        RestaurantApplication.status == 1
+    # Location-based filtering: use live location if available and fresh
+    use_location = (
+        partner.live_latitude is not None and
+        partner.live_longitude is not None and
+        not is_location_stale(partner.location_updated_at)
     )
-    restaurant_ids = [r[0] for r in restaurant_query.all()]
+
+    if use_location:
+        # Find restaurants within delivery radius of partner's live location
+        all_restaurants = db.query(RestaurantApplication).filter(
+            RestaurantApplication.status == 1,
+            RestaurantApplication.latitude.isnot(None),
+            RestaurantApplication.longitude.isnot(None),
+        ).all()
+        
+        restaurant_ids = []
+        for r in all_restaurants:
+            dist = haversine_distance(
+                float(partner.live_latitude), float(partner.live_longitude),
+                float(r.latitude), float(r.longitude)
+            )
+            if dist <= DELIVERY_RADIUS_KM:
+                restaurant_ids.append(r.id)
+        
+        if not restaurant_ids:
+            # Fallback: also include city/area match in case restaurants don't have coordinates
+            city_restaurants = db.query(RestaurantApplication.id).filter(
+                RestaurantApplication.city == partner.city,
+                RestaurantApplication.status == 1
+            ).all()
+            restaurant_ids = [r[0] for r in city_restaurants]
+    else:
+        # Fallback: city + area string matching (original behavior)
+        restaurant_query = db.query(RestaurantApplication.id).filter(
+            RestaurantApplication.city == partner.city,
+            RestaurantApplication.status == 1
+        )
+        # If partner has area set, filter by area too
+        if partner.area:
+            restaurant_query = restaurant_query.filter(RestaurantApplication.area == partner.area)
+        restaurant_ids = [r[0] for r in restaurant_query.all()]
 
     if not restaurant_ids:
-        return {"orders": [], "message": f"No restaurants found in {partner.city} - {partner.area}"}
+        return {"orders": [], "message": f"No restaurants found near your location"}
 
     # Show READY orders only — restaurant must mark food ready before partner can accept
     from app.models.orders import Order, OrderStatus
@@ -744,6 +818,16 @@ def update_delivery_profile(
         partner.area = area.strip() or None
     if phone is not None:
         partner.phone = phone.strip()
+    
+    # Re-geocode if city or area changed
+    if city is not None or area is not None:
+        from app.utils.geocoding import geocode_address
+        location_query = f"{partner.area}, {partner.city}" if partner.area else partner.city
+        coords = geocode_address(location_query)
+        if coords:
+            partner.latitude = coords[0]
+            partner.longitude = coords[1]
+    
     partner.updated_at = datetime.now()
     db.commit()
     return {"message": "Profile updated", "partner": partner.to_dict()}

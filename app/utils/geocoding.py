@@ -3,12 +3,34 @@ Geospatial utilities for delivery radius matching.
 
 - haversine_distance: Pure math distance calc between two GPS points
 - geocode_address: Nominatim API call to convert address → lat/lng
+- reverse_geocode: Nominatim API call to convert lat/lng → address
+- search_address: Nominatim search for address autocomplete
 - filter_by_radius: SQLAlchemy helper to filter rows within a radius
 """
 
 import math
 import httpx
 from typing import Optional, Tuple
+from datetime import datetime, timedelta
+
+# ── Configuration ──────────────────────────────────────────────────────────────
+DELIVERY_RADIUS_KM = 10        # Partner sees orders within this range
+RESTAURANT_RADIUS_KM = 15     # User sees restaurants within this range
+LOCATION_STALE_MINUTES = 10   # Partner location older than this is considered stale
+NOMINATIM_TIMEOUT = 5.0       # Seconds before geocoding request times out
+USER_AGENT = "FujiSakuraFoodApp/1.0 (delivery platform; contact: admin@fujisakura.com)"
+
+
+def validate_coordinates(lat: float, lng: float) -> bool:
+    """Validate that coordinates are within valid ranges."""
+    return -90 <= lat <= 90 and -180 <= lng <= 180
+
+
+def is_location_stale(location_updated_at: Optional[datetime]) -> bool:
+    """Check if a delivery partner's location is too old to be useful."""
+    if not location_updated_at:
+        return True
+    return datetime.now() - location_updated_at > timedelta(minutes=LOCATION_STALE_MINUTES)
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -43,25 +65,23 @@ def geocode_address(address: str, country_code: str = "in") -> Optional[Tuple[fl
     """
     Convert a text address to (latitude, longitude) using Nominatim.
 
-    Uses synchronous httpx to keep it simple for FastAPI sync routes.
     Returns None on any failure — never blocks the calling flow.
-
-    Rate limit: Nominatim allows 1 req/sec. Backend only calls this
-    once per application submission, so well within limits.
+    Rate limit: Nominatim allows 1 req/sec.
     """
+    if not address or not address.strip():
+        return None
+
     try:
         response = httpx.get(
             "https://nominatim.openstreetmap.org/search",
             params={
-                "q": address,
+                "q": address.strip(),
                 "format": "json",
                 "limit": 1,
                 "countrycodes": country_code,
             },
-            headers={
-                "User-Agent": "FujiSakuraFoodApp/1.0 (delivery platform)"
-            },
-            timeout=5.0,
+            headers={"User-Agent": USER_AGENT},
+            timeout=NOMINATIM_TIMEOUT,
         )
         response.raise_for_status()
         results = response.json()
@@ -69,13 +89,156 @@ def geocode_address(address: str, country_code: str = "in") -> Optional[Tuple[fl
         if results and len(results) > 0:
             lat = float(results[0]["lat"])
             lon = float(results[0]["lon"])
-            return (lat, lon)
+            if validate_coordinates(lat, lon):
+                return (lat, lon)
 
         return None
 
+    except httpx.TimeoutException:
+        print(f"⚠️ Geocoding timeout for '{address}'")
+        return None
+    except httpx.HTTPStatusError as e:
+        print(f"⚠️ Geocoding HTTP error for '{address}': {e.response.status_code}")
+        return None
     except Exception as e:
         print(f"⚠️ Geocoding failed for '{address}': {e}")
         return None
+
+
+def reverse_geocode(lat: float, lng: float) -> Optional[dict]:
+    """
+    Convert (latitude, longitude) to a structured address using Nominatim reverse geocoding.
+
+    Returns dict with: full_address, city, area, state, country
+    Returns None on failure.
+    """
+    if not validate_coordinates(lat, lng):
+        return None
+
+    try:
+        response = httpx.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={
+                "lat": lat,
+                "lon": lng,
+                "format": "json",
+                "addressdetails": 1,
+                "zoom": 18,
+            },
+            headers={"User-Agent": USER_AGENT},
+            timeout=NOMINATIM_TIMEOUT,
+        )
+        response.raise_for_status()
+        result = response.json()
+
+        if not result or "error" in result:
+            return None
+
+        address = result.get("address", {})
+        
+        # Extract city — Nominatim uses different keys depending on location
+        city = (
+            address.get("city") or
+            address.get("town") or
+            address.get("village") or
+            address.get("county") or
+            address.get("state_district") or
+            ""
+        )
+        
+        # Extract area/locality
+        area = (
+            address.get("suburb") or
+            address.get("neighbourhood") or
+            address.get("locality") or
+            address.get("hamlet") or
+            ""
+        )
+
+        return {
+            "full_address": result.get("display_name", ""),
+            "city": city,
+            "area": area,
+            "state": address.get("state", ""),
+            "country": address.get("country", ""),
+            "postcode": address.get("postcode", ""),
+        }
+
+    except httpx.TimeoutException:
+        print(f"⚠️ Reverse geocoding timeout for ({lat}, {lng})")
+        return None
+    except httpx.HTTPStatusError as e:
+        print(f"⚠️ Reverse geocoding HTTP error: {e.response.status_code}")
+        return None
+    except Exception as e:
+        print(f"⚠️ Reverse geocoding failed for ({lat}, {lng}): {e}")
+        return None
+
+
+def search_address(query: str, country_code: str = "in", limit: int = 5) -> list:
+    """
+    Search for addresses matching a query string (autocomplete).
+    Returns a list of suggestions with display_name, lat, lng.
+    """
+    if not query or len(query.strip()) < 3:
+        return []
+
+    try:
+        response = httpx.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={
+                "q": query.strip(),
+                "format": "json",
+                "limit": limit,
+                "countrycodes": country_code,
+                "addressdetails": 1,
+            },
+            headers={"User-Agent": USER_AGENT},
+            timeout=NOMINATIM_TIMEOUT,
+        )
+        response.raise_for_status()
+        results = response.json()
+
+        suggestions = []
+        for r in results:
+            lat = float(r["lat"])
+            lon = float(r["lon"])
+            if not validate_coordinates(lat, lon):
+                continue
+                
+            address = r.get("address", {})
+            city = (
+                address.get("city") or
+                address.get("town") or
+                address.get("village") or
+                address.get("county") or
+                ""
+            )
+            area = (
+                address.get("suburb") or
+                address.get("neighbourhood") or
+                address.get("locality") or
+                ""
+            )
+            suggestions.append({
+                "display_name": r.get("display_name", ""),
+                "latitude": lat,
+                "longitude": lon,
+                "city": city,
+                "area": area,
+            })
+
+        return suggestions
+
+    except httpx.TimeoutException:
+        print(f"⚠️ Address search timeout for '{query}'")
+        return []
+    except httpx.HTTPStatusError as e:
+        print(f"⚠️ Address search HTTP error: {e.response.status_code}")
+        return []
+    except Exception as e:
+        print(f"⚠️ Address search failed for '{query}': {e}")
+        return []
 
 
 def bounding_box(lat: float, lng: float, radius_km: float) -> Tuple[float, float, float, float]:

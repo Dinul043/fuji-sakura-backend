@@ -847,20 +847,28 @@ def user_refresh_token(data: UserRefreshRequest, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=401, detail="User not found or deactivated")
 
-    # New access token (same expiry as before)
-    remaining = record.expires_at - datetime.now()
-    access_expires = remaining if remaining.total_seconds() > 3600 else timedelta(days=1)
-
+    # New access token — always 1 hour
     new_access_token = create_access_token(
         data={"sub": str(user.id)},
-        expires_delta=access_expires
+        expires_delta=timedelta(hours=1)
     )
 
-    # Rotate refresh token
+    # Calculate refresh token expiry — same duration as the original
+    # (preserves the remember me choice from login)
+    original_duration = record.expires_at - record.created_at
+    # Clamp: min 1 day, max 30 days
+    if original_duration.total_seconds() < 86400:
+        refresh_expires = timedelta(days=1)
+    elif original_duration.total_seconds() > 30 * 86400:
+        refresh_expires = timedelta(days=30)
+    else:
+        refresh_expires = original_duration
+
+    # Rotate refresh token — revoke old, issue new
     record.revoked = True
     db.commit()
     new_refresh_token = create_refresh_token_for_entity(
-        entity_id=user.id, role="user", db=db, expires_delta=access_expires
+        entity_id=user.id, role="user", db=db, expires_delta=refresh_expires
     )
 
     return {

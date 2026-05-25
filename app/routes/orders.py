@@ -30,6 +30,8 @@ class DeliveryAddressModel(BaseModel):
 
 class CreateOrderRequest(BaseModel):
     delivery_address: DeliveryAddressModel
+    delivery_latitude: Optional[float] = None
+    delivery_longitude: Optional[float] = None
     payment_method: str
     special_instructions: Optional[str] = ""
     cart_items: List[int]  # List of cart item IDs to order
@@ -72,6 +74,20 @@ async def create_order(
             
             if not restaurant:
                 continue
+
+            # Distance validation — block order if restaurant is too far from delivery location
+            from app.utils.geocoding import haversine_distance, RESTAURANT_RADIUS_KM
+            if (request.delivery_latitude and request.delivery_longitude and
+                restaurant.latitude and restaurant.longitude):
+                distance = haversine_distance(
+                    request.delivery_latitude, request.delivery_longitude,
+                    float(restaurant.latitude), float(restaurant.longitude)
+                )
+                if distance > RESTAURANT_RADIUS_KM:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Restaurant '{restaurant.business_name}' is {distance:.1f} km away. Maximum delivery distance is {RESTAURANT_RADIUS_KM} km."
+                    )
 
             # Calculate totals
             subtotal = sum(item.total_price for item in items)
@@ -116,7 +132,9 @@ async def create_order(
                 estimated_delivery_time=30,
                 payment_method=request.payment_method,
                 special_instructions=request.special_instructions,
-                confirmed_at=datetime.now() if request.payment_method == 'cod' else None
+                confirmed_at=datetime.now() if request.payment_method == 'cod' else None,
+                delivery_latitude=request.delivery_latitude,
+                delivery_longitude=request.delivery_longitude,
             )
             
             db.add(order)

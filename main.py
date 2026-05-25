@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from app.core.config import settings
 from app.routes import auth, restaurant, admin_auth, menu, cart, orders, websocket, payment, reviews, delivery
+from app.routes import geocode as geocode_routes
 from app.models import admin_token  # Register AdminToken model with SQLAlchemy — MUST be before cod_settlement
 from app.models import cod_settlement  # Register CodSettlement model
 from app.models import restaurant_payout  # Register RestaurantPayout model
@@ -67,6 +68,9 @@ app.include_router(reviews.router, prefix="/api/reviews", tags=["Reviews"])
 
 # Include delivery partner routes
 app.include_router(delivery.router, prefix="/api/delivery", tags=["Delivery Partners"])
+
+# Include geocoding and address routes
+app.include_router(geocode_routes.router, tags=["Geocoding"])
 
 # Include WebSocket routes
 app.include_router(websocket.router, tags=["WebSocket"])

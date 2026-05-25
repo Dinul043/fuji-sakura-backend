@@ -26,6 +26,9 @@ class DeliveryPartner(Base):
     area = Column(String(100), nullable=True)   # locality/area within city
     latitude = Column(Numeric(10, 8), nullable=True)   # GPS latitude from Nominatim
     longitude = Column(Numeric(11, 8), nullable=True)  # GPS longitude from Nominatim
+    live_latitude = Column(Numeric(10, 8), nullable=True)   # Real-time GPS when online
+    live_longitude = Column(Numeric(11, 8), nullable=True)  # Real-time GPS when online
+    location_updated_at = Column(DateTime, nullable=True)   # Last location ping timestamp
     upi_id = Column(String(100), nullable=True)  # mandatory before taking orders
     status = Column(Integer, default=0, nullable=False)  # 0=pending, 1=approved, 2=rejected
     is_available = Column(Integer, default=0, nullable=False)  # online/offline
@@ -53,6 +56,9 @@ class DeliveryPartner(Base):
             "area": self.area,
             "latitude": float(self.latitude) if self.latitude is not None else None,
             "longitude": float(self.longitude) if self.longitude is not None else None,
+            "live_latitude": float(self.live_latitude) if self.live_latitude is not None else None,
+            "live_longitude": float(self.live_longitude) if self.live_longitude is not None else None,
+            "location_updated_at": self.location_updated_at.isoformat() if self.location_updated_at else None,
             "upi_id": self.upi_id,
             "status": self.status,
             "is_available": bool(self.is_available),

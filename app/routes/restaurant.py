@@ -166,6 +166,15 @@ async def submit_restaurant_application(application_data: RestaurantApplicationR
             application.city = application_data.city.strip()
         if application_data.area:
             application.area = application_data.area.strip()
+        
+        # Geocode the restaurant address to get lat/lng
+        from app.utils.geocoding import geocode_address
+        full_address = f"{application_data.address}, {application_data.area}, {application_data.city}"
+        coords = geocode_address(full_address)
+        if coords:
+            application.latitude = coords[0]
+            application.longitude = coords[1]
+        
         db.commit()
         db.refresh(application)
         
@@ -762,8 +771,19 @@ async def check_license_availability(license_number: str, db: Session = Depends(
         )
 
 @router.get("/public/restaurants")
-async def get_public_restaurants(db: Session = Depends(get_db)):
-    """Get all approved restaurants with images for customer-facing pages"""
+async def get_public_restaurants(
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    radius: Optional[float] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all approved restaurants for customer-facing pages.
+    If lat/lng provided: filter by distance and include distance in response.
+    If not provided: return all restaurants (backward compatible).
+    """
+    from app.utils.geocoding import haversine_distance, RESTAURANT_RADIUS_KM, validate_coordinates
+
     try:
         # Get all approved restaurants that have uploaded restaurant images
         approved_restaurants = db.query(RestaurantApplication).filter(
@@ -772,9 +792,25 @@ async def get_public_restaurants(db: Session = Depends(get_db)):
             RestaurantApplication.restaurant_image != ""
         ).all()
         
+        # Determine if we should filter by location
+        use_location_filter = (
+            lat is not None and lng is not None and
+            validate_coordinates(lat, lng)
+        )
+        filter_radius = radius if radius else RESTAURANT_RADIUS_KM
+
         restaurants_data = []
         from app.models.review import Review
         for restaurant in approved_restaurants:
+            # Calculate distance if user location provided
+            distance_km = None
+            if use_location_filter and restaurant.latitude is not None and restaurant.longitude is not None:
+                distance_km = haversine_distance(
+                    lat, lng,
+                    float(restaurant.latitude), float(restaurant.longitude)
+                )
+                distance_km = round(distance_km, 1)
+
             # Get menu items count for this restaurant
             menu_count = db.query(RestaurantMenu).filter(
                 RestaurantMenu.restaurant_id == restaurant.id,
@@ -796,6 +832,20 @@ async def get_public_restaurants(db: Session = Depends(get_db)):
             real_rating = round(float(review_stats.avg), 1) if review_stats.avg else 0.0
             real_review_count = review_stats.count or 0
 
+            # Estimate delivery time: 10 min cooking + travel time (bike ~20 km/h in city)
+            if distance_km is not None:
+                travel_minutes = max(5, int((distance_km / 20) * 60))  # 20 km/h avg bike speed
+                cooking_minutes = 10
+                total_est = cooking_minutes + travel_minutes
+                delivery_time = f"{total_est}-{total_est + 5} min"
+            else:
+                delivery_time = f"{20 + (restaurant.id % 20)}-{30 + (restaurant.id % 20)} min"
+
+            # Determine if restaurant is within delivery range
+            is_deliverable = True
+            if use_location_filter and distance_km is not None:
+                is_deliverable = distance_km <= filter_radius
+
             restaurant_data = {
                 "id": restaurant.id,
                 "name": restaurant.business_name,
@@ -810,19 +860,32 @@ async def get_public_restaurants(db: Session = Depends(get_db)):
                 "menu_items_count": menu_count,
                 "average_price": avg_price,
                 "created_at": restaurant.created_at.isoformat() if restaurant.created_at else None,
-                "delivery_time": f"{20 + (restaurant.id % 20)}-{30 + (restaurant.id % 20)} min",
+                "delivery_time": delivery_time,
                 "delivery_fee": 40.0,
                 "rating": real_rating,
                 "reviews": real_review_count,
                 "image": "🍽️",
                 "tags": [restaurant.cuisine_type, "Popular", "Fast Delivery"],
-                "category": restaurant.cuisine_type
+                "category": restaurant.cuisine_type,
+                "distance_km": distance_km,
+                "is_deliverable": is_deliverable,
+                "latitude": float(restaurant.latitude) if restaurant.latitude else None,
+                "longitude": float(restaurant.longitude) if restaurant.longitude else None,
             }
             restaurants_data.append(restaurant_data)
         
+        # Sort by distance if location provided (nearest first), non-deliverable at end
+        if use_location_filter:
+            restaurants_data.sort(key=lambda r: (
+                not r["is_deliverable"],  # Deliverable first
+                r["distance_km"] if r["distance_km"] is not None else 9999
+            ))
+
         return {
             "restaurants": restaurants_data,
-            "total_count": len(restaurants_data)
+            "total_count": len(restaurants_data),
+            "filtered_by_location": use_location_filter,
+            "radius_km": filter_radius if use_location_filter else None,
         }
         
     except Exception as e:
