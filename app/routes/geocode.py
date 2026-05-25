@@ -77,6 +77,23 @@ async def save_user_address(
         for addr in existing_defaults:
             addr.is_default = False
 
+    # If label is "Current", update existing instead of creating duplicate
+    if data.label == 'Current':
+        existing_current = db.query(UserAddress).filter(
+            UserAddress.user_id == current_user.id,
+            UserAddress.label == 'Current'
+        ).first()
+        if existing_current:
+            existing_current.full_address = data.full_address.strip()
+            existing_current.city = data.city.strip() if data.city else None
+            existing_current.area = data.area.strip() if data.area else None
+            existing_current.latitude = data.latitude
+            existing_current.longitude = data.longitude
+            existing_current.is_default = data.is_default
+            db.commit()
+            db.refresh(existing_current)
+            return existing_current.to_dict()
+
     # Limit to 5 saved addresses per user
     count = db.query(UserAddress).filter(UserAddress.user_id == current_user.id).count()
     if count >= 5:
