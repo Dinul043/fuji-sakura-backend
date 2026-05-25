@@ -27,29 +27,29 @@ router = APIRouter()
 
 # Pydantic models for request/response
 class UserSignup(BaseModel):
-    email: str  # Temporarily changed from EmailStr to debug
+    email: EmailStr
     firstName: str
     lastName: str
     password: str
 
 class UserLogin(BaseModel):
-    email: str  # Temporarily changed from EmailStr to debug
+    email: EmailStr
     password: str
     rememberMe: bool = False  # Optional field for extended session
 
 class OTPVerification(BaseModel):
-    email: str  # Temporarily changed from EmailStr to debug
+    email: EmailStr
     otp: str
 
 class ForgotPassword(BaseModel):
-    email: str  # Temporarily changed from EmailStr to debug
+    email: EmailStr
 
 class ResetCodeVerification(BaseModel):
-    email: str  # Temporarily changed from EmailStr to debug
+    email: EmailStr
     token: str
 
 class ResetPassword(BaseModel):
-    email: str  # Temporarily changed from EmailStr to debug
+    email: EmailStr
     token: str
     newPassword: str
 
