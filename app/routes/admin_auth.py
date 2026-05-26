@@ -1386,7 +1386,6 @@ async def update_platform_setting(data: UpdateSettingRequest, authorization: str
             # Send notification email (best effort, don't block)
             for r in restaurants:
                 try:
-                    # Simple notification — reuse existing email function pattern
                     import smtplib
                     from email.mime.text import MIMEText
                     from app.core.config import settings as app_settings
@@ -1406,12 +1405,12 @@ This change is effective immediately.
                     
                     msg = MIMEText(body)
                     msg['Subject'] = subject
-                    msg['From'] = app_settings.SMTP_FROM_EMAIL
+                    msg['From'] = app_settings.MAIL_FROM
                     msg['To'] = r.email
                     
-                    with smtplib.SMTP(app_settings.SMTP_HOST, app_settings.SMTP_PORT) as server:
+                    with smtplib.SMTP(app_settings.MAIL_SERVER, app_settings.MAIL_PORT) as server:
                         server.starttls()
-                        server.login(app_settings.SMTP_USERNAME, app_settings.SMTP_PASSWORD)
+                        server.login(app_settings.MAIL_USERNAME, app_settings.MAIL_PASSWORD)
                         server.send_message(msg)
                 except Exception:
                     pass  # Don't block on email failure
@@ -1457,12 +1456,15 @@ class UpdateTaxCategoryRequest(BaseModel):
     is_active: Optional[bool] = None
 
 @router.put("/tax-categories")
-def update_tax_category(data: UpdateTaxCategoryRequest, authorization: str = Header(None), db: Session = Depends(get_db)):
+@router.put("/tax-categories")
+async def update_tax_category(data: UpdateTaxCategoryRequest, authorization: str = Header(None), db: Session = Depends(get_db)):
     """Update or create a tax category — admin only."""
     admin = get_admin_from_token(authorization, db)
     from app.models.platform_settings import TaxCategory
 
     record = db.query(TaxCategory).filter(TaxCategory.name == data.name).first()
+    old_percent = float(record.tax_percent) if record else None
+    
     if record:
         if data.display_name is not None:
             record.display_name = data.display_name
@@ -1489,4 +1491,21 @@ def update_tax_category(data: UpdateTaxCategoryRequest, authorization: str = Hea
 
     db.commit()
     db.refresh(record)
+
+    # Notify restaurants if tax rate changed
+    if data.tax_percent is not None and old_percent is not None and data.tax_percent != old_percent:
+        try:
+            from app.utils.websocket_manager import manager
+            from app.models.restaurant_application import RestaurantApplication
+            for r in db.query(RestaurantApplication).filter(RestaurantApplication.status == 1).all():
+                await manager.send_restaurant_notification(r.id, {
+                    "type": "platform_setting_updated",
+                    "setting": f"tax_{data.name}",
+                    "old_value": str(old_percent),
+                    "new_value": str(data.tax_percent),
+                    "message": f"GST rate for {record.display_name} changed from {old_percent}% to {data.tax_percent}%"
+                })
+        except Exception:
+            pass
+
     return {"message": f"Tax category '{data.name}' updated", "category": record.to_dict()}
