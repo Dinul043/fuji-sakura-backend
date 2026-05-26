@@ -1364,7 +1364,7 @@ class UpdateSettingRequest(BaseModel):
     value: str
 
 @router.put("/settings")
-def update_platform_setting(data: UpdateSettingRequest, authorization: str = Header(None), db: Session = Depends(get_db)):
+async def update_platform_setting(data: UpdateSettingRequest, authorization: str = Header(None), db: Session = Depends(get_db)):
     """Update a platform setting — admin only. Notifies affected restaurants via email."""
     admin = get_admin_from_token(authorization, db)
     from app.models.platform_settings import PlatformSetting
@@ -1417,6 +1417,23 @@ This change is effective immediately.
                     pass  # Don't block on email failure
         except Exception:
             pass  # Don't block settings update on notification failure
+
+    # Send WebSocket notification to all restaurant dashboards
+    if data.key in notify_keys and old_value != data.value:
+        try:
+            from app.utils.websocket_manager import manager
+            from app.models.restaurant_application import RestaurantApplication
+            # Notify all restaurants via WebSocket
+            for r in db.query(RestaurantApplication).filter(RestaurantApplication.status == 1).all():
+                await manager.send_restaurant_notification(r.id, {
+                    "type": "platform_setting_updated",
+                    "setting": data.key,
+                    "old_value": old_value,
+                    "new_value": data.value,
+                    "message": f"Platform setting updated: {data.key.replace('_', ' ').title()} changed from {old_value} to {data.value}"
+                })
+        except Exception:
+            pass  # Don't block on WebSocket failure
 
     return {"message": f"Setting '{data.key}' updated to '{data.value}'", "setting": record.to_dict()}
 
