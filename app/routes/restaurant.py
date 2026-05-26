@@ -117,7 +117,6 @@ async def submit_restaurant_application(application_data: RestaurantApplicationR
                 )
             elif existing_email_application.status == ApplicationStatus.REJECTED:
                 # For rejected applications, allow reapplication but delete the old rejected record first
-                print(f"🔄 Removing old rejected application for {application_data.email} to allow reapplication")
                 db.delete(existing_email_application)
                 db.commit()
         
@@ -190,7 +189,6 @@ async def submit_restaurant_application(application_data: RestaurantApplicationR
     except Exception as e:
         # Catch DB constraint violations and other unexpected errors
         error_msg = str(e)
-        print(f"Restaurant application error: {error_msg}")
         
         # Check for common DB constraint violations
         if 'Duplicate entry' in error_msg or 'UNIQUE constraint' in error_msg or 'IntegrityError' in error_msg:
@@ -210,7 +208,6 @@ async def submit_restaurant_application(application_data: RestaurantApplicationR
             detail="Failed to submit application. Please try again later."
         )
     except Exception as e:
-        print(f"Restaurant application error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to submit application. Please try again."
@@ -223,7 +220,6 @@ async def get_all_applications(status_filter: Optional[str] = None, db: Session 
         applications = RestaurantApplication.get_all_by_status(db, status_filter)
         return [app.to_dict() for app in applications]
     except Exception as e:
-        print(f"Get applications error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve applications"
@@ -243,7 +239,6 @@ async def get_application_by_id(application_id: int, db: Session = Depends(get_d
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Get application error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve application"
@@ -301,14 +296,12 @@ async def update_application_status(
         if original_status != status_int:
             try:
                 if status_int == ApplicationStatus.APPROVED:
-                    print(f"📧 Sending approval email to {application.email}")
                     send_restaurant_approval_email(
                         email=application.email,
                         restaurant_name=application.business_name,
                         owner_name=application.owner_name
                     )
                 elif status_int == ApplicationStatus.REJECTED:
-                    print(f"📧 Sending rejection email to {application.email}")
                     send_restaurant_rejection_email(
                         email=application.email,
                         restaurant_name=application.business_name,
@@ -316,15 +309,13 @@ async def update_application_status(
                         rejection_reason=admin_notes or ""
                     )
             except Exception as email_error:
-                print(f"⚠️ Email notification failed: {email_error}")
-                # Don't fail the status update if email fails
+                pass  # Don't fail the status update if email fails
         
         return application.to_dict()
         
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Update application status error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update application status"
@@ -398,7 +389,6 @@ async def get_restaurant_profile(authorization: str = Header(None), db: Session 
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Get restaurant profile error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch restaurant profile"
@@ -502,9 +492,7 @@ async def get_restaurant_stats(authorization: str = Header(None), db: Session = 
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Get restaurant stats error: {e}")
         import traceback
-        print(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch restaurant stats"
@@ -601,7 +589,6 @@ async def update_restaurant_profile(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Update restaurant profile error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update restaurant profile"
@@ -649,7 +636,6 @@ async def restaurant_logout(authorization: str = Header(None), db: Session = Dep
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Restaurant logout error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Logout failed"
@@ -731,8 +717,6 @@ async def restaurant_login(login_data: RestaurantLoginRequest, db: Session = Dep
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Restaurant login error: {e}")
-        print(f"Login attempt for email: {login_data.email}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Login failed. Please try again."
@@ -748,7 +732,6 @@ async def check_phone_availability(phone: str, db: Session = Depends(get_db)):
             "message": "Phone number is available" if existing_application is None else "This phone number is already registered with another restaurant"
         }
     except Exception as e:
-        print(f"Phone check error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to check phone availability"
@@ -764,7 +747,6 @@ async def check_license_availability(license_number: str, db: Session = Depends(
             "message": "Business license is available" if existing_application is None else "This business license number is already registered with another restaurant"
         }
     except Exception as e:
-        print(f"License check error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to check license availability"
@@ -893,7 +875,6 @@ async def get_public_restaurants(
         }
         
     except Exception as e:
-        print(f"Get public restaurants error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch restaurants"
@@ -975,7 +956,6 @@ async def get_public_restaurant_details(restaurant_id: int, db: Session = Depend
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Get restaurant details error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch restaurant details"
@@ -1017,7 +997,6 @@ async def get_restaurant_categories(db: Session = Depends(get_db)):
         }
         
     except Exception as e:
-        print(f"Get categories error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch categories"
@@ -1114,7 +1093,6 @@ async def check_database_integrity(db: Session = Depends(get_db)):
         return integrity_report
         
     except Exception as e:
-        print(f"Integrity check error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to perform integrity check"
@@ -1216,7 +1194,6 @@ async def upload_restaurant_image(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Upload restaurant image error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to upload restaurant image"
@@ -1364,7 +1341,6 @@ async def restaurant_forgot_password(
         user_name=restaurant.business_name
     )
 
-    print(f"🔑 Restaurant reset token for {restaurant.email}: {token}")
     return {"message": "If this email is registered, a reset code has been sent."}
 
 
@@ -1537,7 +1513,6 @@ async def get_restaurant_earnings(authorization: str = Header(None), db: Session
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Get restaurant earnings error: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch earnings")
 
 
@@ -1624,7 +1599,7 @@ async def restaurant_cancel_order(
                 elif payment and payment.payment_status == PaymentStatus.REFUNDED:
                     refund_initiated = True  # already refunded, don't retry
             except Exception as e:
-                print(f"⚠️ Refund failed for order {order.id}: {e}")
+                pass
 
         db.commit()
         db.refresh(order)
@@ -1658,7 +1633,6 @@ async def restaurant_cancel_order(
         raise
     except Exception as e:
         db.rollback()
-        print(f"Restaurant cancel order error: {e}")
         raise HTTPException(status_code=500, detail="Failed to cancel order")
 
 

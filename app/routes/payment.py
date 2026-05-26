@@ -166,7 +166,6 @@ async def initiate_payment(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Payment initiation error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to initiate payment"
@@ -251,7 +250,6 @@ async def payment_success(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Payment success error: {e}")
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -320,7 +318,6 @@ async def payment_failure(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Payment failure error: {e}")
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -378,7 +375,6 @@ async def get_payment_status(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Get payment status error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get payment status"
@@ -450,18 +446,15 @@ async def create_razorpay_order(
             )
         
         # Create Razorpay order
-        print(f"Creating Razorpay order for order_id={order.id}, amount={payment.amount}")
         try:
             razorpay_result = razorpay_service.create_order(
                 amount=payment.amount,
                 order_id=order.id
             )
             
-            print(f"Razorpay result: {razorpay_result}")
             
             if not razorpay_result["success"]:
                 error_msg = razorpay_result.get('error', 'Unknown error')
-                print(f"❌ Razorpay order creation failed: {error_msg}")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"Failed to create Razorpay order: {error_msg}"
@@ -469,9 +462,7 @@ async def create_razorpay_order(
         except HTTPException:
             raise
         except Exception as e:
-            print(f"❌ Exception in Razorpay order creation: {str(e)}")
             import traceback
-            print(f"❌ Traceback: {traceback.format_exc()}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Razorpay error: {str(e)}"
@@ -497,7 +488,6 @@ async def create_razorpay_order(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Create Razorpay order error: {e}")
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -515,13 +505,6 @@ async def verify_razorpay_payment(
     This is called after user completes payment in Razorpay popup
     """
     try:
-        print(f"\n{'='*60}")
-        print(f"PAYMENT VERIFICATION REQUEST")
-        print(f"{'='*60}")
-        print(f"Order ID: {request.order_id}")
-        print(f"User ID: {current_user.id}")
-        print(f"Razorpay Order ID: {request.razorpay_order_id}")
-        print(f"Razorpay Payment ID: {request.razorpay_payment_id}")
         
         # Get order
         order = db.query(Order).filter(
@@ -530,13 +513,11 @@ async def verify_razorpay_payment(
         ).first()
         
         if not order:
-            print(f"❌ Order not found: {request.order_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Order not found"
             )
         
-        print(f"✅ Order found: {order.order_number}")
         
         # Get payment record
         payment = db.query(Payment).filter(
@@ -544,13 +525,11 @@ async def verify_razorpay_payment(
         ).order_by(Payment.created_at.desc()).first()
         
         if not payment:
-            print(f"❌ Payment record not found for order: {order.id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Payment record not found"
             )
         
-        print(f"✅ Payment record found: ID={payment.id}")
         
         # Verify payment signature
         is_valid = razorpay_service.verify_payment_signature(
@@ -582,7 +561,7 @@ async def verify_razorpay_payment(
         # Even if fetch fails, payment is valid (signature verified above)
         # Just log the failure and continue
         if not payment_details["success"]:
-            print(f"⚠️ Could not fetch payment details for {request.razorpay_payment_id}: {payment_details.get('error')}")
+            pass
         
         # Update payment record
         payment.payment_status = PaymentStatus.PAID
@@ -608,7 +587,6 @@ async def verify_razorpay_payment(
             OrderItem.order_id == order.id
         ).all()
         
-        print(f"📦 Found {len(order_items)} order items to clear from cart")
         
         # Delete cart items that match the order items
         for order_item in order_items:
@@ -620,9 +598,7 @@ async def verify_razorpay_payment(
             
             for cart_item in cart_items_to_delete:
                 db.delete(cart_item)
-                print(f"🗑️  Deleted cart item: {cart_item.item_name}")
         
-        print(f"✅ Cart cleared for user {current_user.id} after successful payment")
         
         db.commit()
         db.refresh(order)
@@ -659,10 +635,8 @@ async def verify_razorpay_payment(
                     "created_at": datetime.now().isoformat()
                 }
             )
-            print(f"✅ Real-time notification sent to restaurant {order.restaurant_id}")
         except Exception as e:
-            print(f"⚠️ Failed to send real-time notification: {e}")
-            # Don't fail the payment if notification fails
+            pass  # Don't fail the payment if notification fails
 
         # NOTE: Do NOT notify delivery partners here.
         # Partners only see orders when restaurant marks READY (order_ready_for_pickup event).
@@ -681,7 +655,6 @@ async def verify_razorpay_payment(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Verify Razorpay payment error: {e}")
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

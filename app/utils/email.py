@@ -19,12 +19,6 @@ def send_otp_email(to_email: str, otp: str, user_name: str = "User") -> bool:
     """
     if not settings.MAIL_USERNAME or not settings.MAIL_PASSWORD:
         logger.warning("⚠️ Mailtrap credentials not configured.")
-        print(f"\n{'='*60}")
-        print(f"📧 EMAIL TO: {to_email}")
-        print(f"👤 USER: {user_name}")
-        print(f"🔐 OTP CODE: {otp}")
-        print(f"⏰ EXPIRES: 10 minutes")
-        print(f"{'='*60}\n")
         return True  # Return True so the flow continues
 
     try:

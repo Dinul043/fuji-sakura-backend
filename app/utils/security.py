@@ -24,7 +24,6 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
         return pwd_context.verify(plain_password, hashed_password)
     except Exception as e:
-        print(f"Password verification error: {e}")
         return False
 
 def get_password_hash(password: str) -> str:
@@ -32,7 +31,6 @@ def get_password_hash(password: str) -> str:
     try:
         return pwd_context.hash(password)
     except Exception as e:
-        print(f"Password hashing error: {e}")
         raise ValueError("Failed to hash password")
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):

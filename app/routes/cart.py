@@ -65,7 +65,6 @@ async def add_to_cart(
             )
         
         # Check if item already exists in cart
-        print(f"🔍 Checking for existing cart item: user_id={current_user.id}, menu_item_id={request.menu_item_id}")
         existing_cart_item = db.query(UserCart).filter(
             UserCart.user_id == current_user.id,
             UserCart.menu_item_id == request.menu_item_id
@@ -73,7 +72,6 @@ async def add_to_cart(
         
         if existing_cart_item:
             # Update quantity
-            print(f"✅ Found existing item, updating quantity: {existing_cart_item.quantity} + {request.quantity}")
             existing_cart_item.quantity += request.quantity
             db.commit()
             db.refresh(existing_cart_item)
@@ -83,7 +81,6 @@ async def add_to_cart(
             }
         else:
             # Create new cart item
-            print(f"✅ Creating new cart item: {menu_item.item_name} (menu_item_id: {request.menu_item_id})")
             cart_item = UserCart(
                 user_id=current_user.id,
                 restaurant_id=menu_item.restaurant_id,
@@ -102,7 +99,6 @@ async def add_to_cart(
             db.commit()
             db.refresh(cart_item)
             
-            print(f"✅ Cart item created with cart_id: {cart_item.id}, menu_item_id: {cart_item.menu_item_id}")
             return {
                 "message": "Item added to cart successfully",
                 "cart_item": cart_item.to_dict()

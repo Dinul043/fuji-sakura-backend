@@ -10,7 +10,6 @@ import hashlib
 class RazorpayService:
     def __init__(self):
         """Initialize Razorpay client with API keys"""
-        print(f"Initializing Razorpay with Key ID: {settings.RAZORPAY_KEY_ID[:10]}...")
         self.client = razorpay.Client(
             auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
         )
@@ -18,7 +17,6 @@ class RazorpayService:
             "title": "Fuji Sakura Food Delivery",
             "version": "1.0"
         })
-        print("Razorpay client initialized successfully")
     
     def create_order(self, amount: float, order_id: int, currency: str = "INR"):
         """
@@ -36,10 +34,6 @@ class RazorpayService:
             # Convert amount to paise (smallest currency unit)
             amount_in_paise = int(amount * 100)
             
-            print(f"📝 Creating Razorpay order:")
-            print(f"   Amount: ₹{amount} ({amount_in_paise} paise)")
-            print(f"   Order ID: {order_id}")
-            print(f"   Currency: {currency}")
             
             # Create order in Razorpay
             razorpay_order = self.client.order.create({
@@ -49,7 +43,6 @@ class RazorpayService:
                 "payment_capture": 1  # Auto capture payment
             })
             
-            print(f"✅ Razorpay order created: {razorpay_order['id']}")
             
             return {
                 "success": True,
@@ -59,9 +52,7 @@ class RazorpayService:
                 "receipt": razorpay_order["receipt"]
             }
         except Exception as e:
-            print(f"❌ Razorpay order creation failed: {str(e)}")
             import traceback
-            print(f"❌ Full traceback: {traceback.format_exc()}")
             return {
                 "success": False,
                 "error": str(e)
@@ -75,9 +66,6 @@ class RazorpayService:
     ) -> bool:
         """Verify payment signature for security"""
         try:
-            print(f"🔐 Verifying payment signature:")
-            print(f"   Order ID: {razorpay_order_id}")
-            print(f"   Payment ID: {razorpay_payment_id}")
             
             message = f"{razorpay_order_id}|{razorpay_payment_id}"
             
@@ -90,15 +78,13 @@ class RazorpayService:
             is_valid = hmac.compare_digest(expected_signature, razorpay_signature)
             
             if is_valid:
-                print(f"✅ Signature verification successfull!")
+                pass
             else:
-                print(f"❌ Signature verification failed!")
+                pass
             
             return is_valid
         except Exception as e:
-            print(f"❌ Signature verification error: {e}")
             import traceback
-            print(f"❌ Traceback: {traceback.format_exc()}")
             return False
             return False
     
@@ -141,15 +127,12 @@ class RazorpayService:
             if amount:
                 data['amount'] = int(round(amount * 100))  # Convert rupees to paise as integer
             
-            print(f"🔄 Initiating refund: payment_id={payment_id}, data={data}")
             refund = self.client.payment.refund(payment_id, data)
-            print(f"✅ Refund successful: {refund.get('id')}, status={refund.get('status')}")
             return {
                 "success": True,
                 "refund": refund
             }
         except Exception as e:
-            print(f"❌ Refund failed: payment_id={payment_id}, error={str(e)}")
             return {
                 "success": False,
                 "error": str(e)

@@ -99,7 +99,6 @@ def get_authenticated_restaurant(authorization: str, db: Session) -> RestaurantA
             detail="Restaurant not found or not approved"
         )
     
-    print(f"🔐 Authenticated Restaurant: {restaurant_app.business_name} (ID: {restaurant_app.id}, Email: {restaurant_app.email})")
     
     return restaurant_app
 
@@ -136,7 +135,6 @@ async def get_restaurant_menu(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Get menu error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch menu items"
@@ -176,7 +174,6 @@ async def create_menu_item(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Create menu item error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create menu item"
@@ -204,7 +201,6 @@ async def get_menu_item(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Get menu item error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch menu item"
@@ -228,9 +224,6 @@ async def update_menu_item(
                 detail="Menu item not found"
             )
         
-        print(f"🔄 Updating menu item {item_id}")
-        print(f"   Current is_veg: {existing_item.is_veg}")
-        print(f"   New is_veg: {menu_item.is_veg}")
         
         # Update the item
         existing_item.update_item(
@@ -243,7 +236,6 @@ async def update_menu_item(
             is_veg=menu_item.is_veg
         )
         
-        print(f"   Updated is_veg: {existing_item.is_veg}")
         
         # Broadcast menu item update via WebSocket
         await manager.broadcast_restaurant_update(existing_item.restaurant_id, {
@@ -257,7 +249,6 @@ async def update_menu_item(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Update menu item error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update menu item"
@@ -300,7 +291,6 @@ async def toggle_menu_item_availability(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Toggle menu item error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to toggle menu item availability"
@@ -352,7 +342,6 @@ async def delete_menu_item(
         raise
     except Exception as e:
         db.rollback()
-        print(f"Delete menu item error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete menu item"
@@ -385,7 +374,6 @@ async def search_menu_items(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Search menu items error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to search menu items"
@@ -444,7 +432,6 @@ async def upload_menu_image(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Upload image error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to upload image"

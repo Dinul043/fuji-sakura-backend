@@ -109,7 +109,7 @@ async def apply_delivery_partner(data: DeliveryApplyRequest, db: Session = Depen
             "partner": partner.to_dict()
         })
     except Exception as e:
-        print(f"⚠️ WebSocket notification failed: {e}")
+        pass
 
     return {
         "message": "Application submitted successfully! We'll review and notify you via email.",
@@ -248,9 +248,8 @@ def delivery_forgot_password(data: DeliveryForgotRequest, db: Session = Depends(
         from app.utils.email import send_password_reset_email
         send_password_reset_email(to_email=partner.email, reset_token=token, user_name=partner.name)
     except Exception as e:
-        print(f"⚠️ Failed to send reset email: {e}")
+        pass
 
-    print(f"🔑 Delivery reset token for {partner.email}: {token}")
     return {"message": "Reset code sent to your email."}
 
 
@@ -656,7 +655,7 @@ async def complete_order(order_id: int, authorization: str = FastAPIHeader(None)
             )
             db.add(payout)
     except Exception as e:
-        print(f"⚠️ Failed to create restaurant payout for order {order.id}: {e}")
+        pass
 
     db.commit()
 
@@ -1116,7 +1115,6 @@ def report_cod_issue(data: CodIssueRequest, authorization: str = FastAPIHeader(N
     if not data.issue_description.strip():
         raise HTTPException(status_code=400, detail="Please describe the issue")
     # Log for admin visibility — stored in cod_settlements as a failed record note
-    print(f"⚠️ COD Issue reported by partner {partner.id} ({partner.name}): ₹{data.amount} — {data.issue_description}")
     return {"message": "Issue reported. Admin will contact you shortly."}
 
 

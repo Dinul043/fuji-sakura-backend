@@ -26,7 +26,6 @@ def delete_old_image(image_url: Optional[str], image_type: str = "restaurant") -
         elif image_type == "menu":
             upload_path = "uploads/menu_images/"
         else:
-            print(f"Warning: Unknown image type '{image_type}'")
             return False
         
         # Extract filename from URL
@@ -36,17 +35,13 @@ def delete_old_image(image_url: Optional[str], image_type: str = "restaurant") -
             
             if file_path.exists():
                 file_path.unlink()  # Delete the file
-                print(f"✅ Deleted old {image_type} image: {filename}")
                 return True
             else:
-                print(f"ℹ️ Old {image_type} image not found: {filename}")
                 return True
         else:
-            print(f"ℹ️ Image URL doesn't match expected pattern: {image_url}")
             return True
             
     except Exception as e:
-        print(f"⚠️ Warning: Could not delete old {image_type} image: {e}")
         return False
 
 def cleanup_restaurant_images(restaurant_id: int, keep_latest: int = 1) -> int:
@@ -83,15 +78,13 @@ def cleanup_restaurant_images(restaurant_id: int, keep_latest: int = 1) -> int:
         for old_file in restaurant_files[keep_latest:]:
             try:
                 old_file.unlink()
-                print(f"🧹 Cleaned up old restaurant image: {old_file.name}")
                 deleted_count += 1
             except Exception as e:
-                print(f"⚠️ Could not delete {old_file.name}: {e}")
+                pass
         
         return deleted_count
         
     except Exception as e:
-        print(f"⚠️ Error during restaurant image cleanup: {e}")
         return 0
 
 def cleanup_menu_images(restaurant_id: int, menu_item_id: Optional[int] = None) -> int:
@@ -127,13 +120,11 @@ def cleanup_menu_images(restaurant_id: int, menu_item_id: Optional[int] = None) 
         for old_file in files_to_check:
             try:
                 old_file.unlink()
-                print(f"🧹 Cleaned up old menu image: {old_file.name}")
                 deleted_count += 1
             except Exception as e:
-                print(f"⚠️ Could not delete {old_file.name}: {e}")
+                pass
         
         return deleted_count
         
     except Exception as e:
-        print(f"⚠️ Error during menu image cleanup: {e}")
         return 0

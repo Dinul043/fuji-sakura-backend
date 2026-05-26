@@ -95,13 +95,10 @@ def geocode_address(address: str, country_code: str = "in") -> Optional[Tuple[fl
         return None
 
     except httpx.TimeoutException:
-        print(f"⚠️ Geocoding timeout for '{address}'")
         return None
     except httpx.HTTPStatusError as e:
-        print(f"⚠️ Geocoding HTTP error for '{address}': {e.response.status_code}")
         return None
     except Exception as e:
-        print(f"⚠️ Geocoding failed for '{address}': {e}")
         return None
 
 
@@ -165,13 +162,10 @@ def reverse_geocode(lat: float, lng: float) -> Optional[dict]:
         }
 
     except httpx.TimeoutException:
-        print(f"⚠️ Reverse geocoding timeout for ({lat}, {lng})")
         return None
     except httpx.HTTPStatusError as e:
-        print(f"⚠️ Reverse geocoding HTTP error: {e.response.status_code}")
         return None
     except Exception as e:
-        print(f"⚠️ Reverse geocoding failed for ({lat}, {lng}): {e}")
         return None
 
 
@@ -231,13 +225,10 @@ def search_address(query: str, country_code: str = "in", limit: int = 5) -> list
         return suggestions
 
     except httpx.TimeoutException:
-        print(f"⚠️ Address search timeout for '{query}'")
         return []
     except httpx.HTTPStatusError as e:
-        print(f"⚠️ Address search HTTP error: {e.response.status_code}")
         return []
     except Exception as e:
-        print(f"⚠️ Address search failed for '{query}': {e}")
         return []
 
 

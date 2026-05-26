@@ -240,8 +240,6 @@ async def create_order(
     except Exception as e:
         db.rollback()
         import traceback
-        print(f"❌ Error creating order: {str(e)}")
-        print(f"❌ Full traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create order: {str(e)}"
@@ -264,7 +262,6 @@ async def get_user_orders(
         return [order.to_dict() for order in orders]
         
     except Exception as e:
-        print(f"❌ Error fetching orders: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch orders"
@@ -294,7 +291,6 @@ async def get_order_details(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Error fetching order details: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch order details"
@@ -327,7 +323,6 @@ async def get_restaurant_orders(
         return result
 
     except Exception as e:
-        print(f"❌ Error fetching restaurant orders: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch restaurant orders"
@@ -373,9 +368,6 @@ async def update_order_status(
                 ).first()
                 
                 if payment and payment.gateway_payment_id:
-                    print(f"💰 Initiating refund for order {order.order_number}")
-                    print(f"   Payment ID: {payment.gateway_payment_id}")
-                    print(f"   Amount: ₹{order.total_amount}")
                     
                     # Initiate refund via Razorpay
                     from app.services.razorpay_service import razorpay_service
@@ -385,8 +377,6 @@ async def update_order_status(
                     )
                     
                     if refund_result.get('success'):
-                        print(f"✅ Refund initiated successfully")
-                        print(f"   Refund ID: {refund_result['refund'].get('id')}")
                         
                         # Update payment status to refunded
                         payment.payment_status = PayStatus.REFUNDED
@@ -396,20 +386,17 @@ async def update_order_status(
                         order.payment_status = PaymentStatus.REFUNDED
                     else:
                         error_msg = refund_result.get('error', 'Unknown error')
-                        print(f"❌ Refund failed: {error_msg}")
                         
                         # Check if already refunded
                         if 'already' in error_msg.lower() and 'refund' in error_msg.lower():
-                            print(f"ℹ️ Payment already refunded, updating status")
                             payment.payment_status = PayStatus.REFUNDED
                             order.payment_status = OrderPaymentStatus.REFUNDED
                         else:
                             # For other errors, just log but still cancel the order
-                            print(f"⚠️ Continuing with cancellation despite refund failure")
                             payment.failure_reason = f"Refund failed: {error_msg}"
                             # Don't change payment_status if refund fails
                 elif order.payment_status == PaymentStatus.REFUNDED:
-                    print(f"ℹ️ Order already has refunded status, skipping refund")
+                    pass
         
         # Update order status
         order.status = new_status
@@ -442,7 +429,7 @@ async def update_order_status(
                     )
                     db.add(payout)
             except Exception as e:
-                print(f"⚠️ Failed to create restaurant payout for order {order.id}: {e}")
+                pass
         
         db.commit()
         db.refresh(order)
@@ -478,9 +465,7 @@ async def update_order_status(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Error updating order status: {str(e)}")
         import traceback
-        print(f"❌ Traceback: {traceback.format_exc()}")
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -497,7 +482,6 @@ async def update_order_status(
         raise
     except Exception as e:
         db.rollback()
-        print(f"❌ Error updating order status: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update order status"
@@ -566,11 +550,10 @@ async def cancel_order(
                             payment.failure_reason = "Order cancelled by customer — refund initiated"
                             order.payment_status = OrderPaymentStatus.REFUNDED
                             refund_initiated = True
-                            print(f"✅ Refund initiated for order {order.id}: {refund['refund'].get('id')}")
                         else:
-                            print(f"⚠️ Refund failed for order {order.id}: {refund}")
+                            pass
             except Exception as e:
-                print(f"⚠️ Refund exception for order {order.id}: {e}")
+                pass
 
         db.commit()
         db.refresh(order)
@@ -602,7 +585,6 @@ async def cancel_order(
         raise
     except Exception as e:
         db.rollback()
-        print(f"❌ Error cancelling order: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to cancel order")
     
     

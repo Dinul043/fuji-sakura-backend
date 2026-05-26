@@ -70,7 +70,6 @@ async def admin_login(login_data: AdminLogin, db: Session = Depends(get_db)):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Admin login error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Login failed. Please try again."
@@ -144,7 +143,6 @@ async def verify_admin_token(authorization: str = Header(None), db: Session = De
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Admin token verification error: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token verification failed"
@@ -258,7 +256,6 @@ async def create_admin(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Create admin error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create admin. Please try again."
@@ -343,7 +340,6 @@ async def list_admins(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"List admins error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch admin list. Please try again."
@@ -439,7 +435,6 @@ async def deactivate_admin(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Deactivate admin error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to deactivate admin. Please try again."
@@ -527,7 +522,6 @@ async def reactivate_admin(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Reactivate admin error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to reactivate admin. Please try again."
@@ -673,7 +667,7 @@ async def approve_delivery_partner(
             owner_name=partner.name
         )
     except Exception as e:
-        print(f"⚠️ Failed to send approval email: {e}")
+        pass
 
     return {"message": f"Delivery partner '{partner.name}' approved successfully", "partner": partner.to_dict()}
 
@@ -710,7 +704,7 @@ async def reject_delivery_partner(
             rejection_reason=data.notes.strip() or "Your application did not meet our current requirements."
         )
     except Exception as e:
-        print(f"⚠️ Failed to send rejection email: {e}")
+        pass
 
     return {"message": f"Delivery partner '{partner.name}' rejected", "partner": partner.to_dict()}
 
@@ -866,7 +860,7 @@ async def mark_payout_paid(
             "amount_paid": round(total, 2)
         })
     except Exception as e:
-        print(f"⚠️ WebSocket notification failed: {e}")
+        pass
 
     return {
         "message": f"Marked {len(pending)} deliveries as paid for {partner.name}",
@@ -923,6 +917,7 @@ async def get_partner_cod_settlements(
     from app.models.cod_settlement import CodSettlement
     from app.models.delivery_partner import DeliveryPartner
     from app.routes.delivery import calculate_cod_due
+    from app.models.platform_settings import PlatformSetting
 
     partner = db.query(DeliveryPartner).filter(DeliveryPartner.id == partner_id).first()
     if not partner:
@@ -943,7 +938,7 @@ async def get_partner_cod_settlements(
             "upi_id": partner.upi_id
         },
         "current_cod_due": current_cod_due,
-        "is_blocked": current_cod_due >= 1500,
+        "is_blocked": current_cod_due >= float(PlatformSetting.get(db, 'cod_limit', '1500')),
         "settlements": [s.to_dict() for s in settlements],
         "total_settled": sum(float(s.amount) for s in settlements if s.status.value == "paid")
     }
@@ -1267,7 +1262,6 @@ async def retry_refund(
             payment.failure_reason = "Order cancelled — refund initiated by admin"
             order.payment_status = OrderPaymentStatus.REFUNDED
             db.commit()
-            print(f"✅ Admin retry refund successful for order {order.order_number}: {result['refund'].get('id')}")
             return {
                 "message": f"Refund of ₹{order.total_amount} initiated successfully",
                 "refund_id": result['refund'].get('id'),
@@ -1276,7 +1270,6 @@ async def retry_refund(
             }
         else:
             error = result.get('error', 'Unknown error')
-            print(f"❌ Admin retry refund failed for order {order.order_number}: {error}")
 
             # If error says "already refunded" — just mark as refunded in DB
             if 'already' in error.lower() and 'refund' in error.lower():
@@ -1305,14 +1298,13 @@ async def retry_refund(
                         "amount": order.total_amount
                     }
             except Exception as check_err:
-                print(f"⚠️ Razorpay payment check failed: {check_err}")
+                pass
 
             raise HTTPException(status_code=400, detail=f"Refund could not be processed: {error}. Please check Razorpay dashboard manually.")
 
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Unexpected error in retry-refund for order {order_id}: {e}")
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Refund failed due to an unexpected error: {str(e)}")
 

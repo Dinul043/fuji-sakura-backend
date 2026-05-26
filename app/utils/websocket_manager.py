@@ -108,7 +108,6 @@ class ConnectionManager:
         if restaurant_id not in self.restaurant_connections:
             self.restaurant_connections[restaurant_id] = set()
         self.restaurant_connections[restaurant_id].add(websocket)
-        print(f"✅ Restaurant {restaurant_id} connected for notifications")
     
     def disconnect_restaurant(self, websocket: WebSocket, restaurant_id: int):
         """Disconnect restaurant dashboard"""
@@ -116,7 +115,6 @@ class ConnectionManager:
             self.restaurant_connections[restaurant_id].discard(websocket)
             if not self.restaurant_connections[restaurant_id]:
                 del self.restaurant_connections[restaurant_id]
-            print(f"🔌 Restaurant {restaurant_id} disconnected")
     
     async def send_restaurant_notification(self, restaurant_id: int, notification_data: dict):
         """
@@ -134,16 +132,14 @@ class ConnectionManager:
             for connection in self.restaurant_connections[restaurant_id]:
                 try:
                     await connection.send_json(message)
-                    print(f"📤 Sent new order notification to restaurant {restaurant_id}")
                 except Exception as e:
-                    print(f"❌ Failed to send notification: {e}")
                     disconnected.add(connection)
             
             # Clean up disconnected connections
             for connection in disconnected:
                 self.restaurant_connections[restaurant_id].discard(connection)
         else:
-            print(f"⚠️ No active connections for restaurant {restaurant_id}")
+            pass
 
     async def send_restaurant_status_update(self, restaurant_id: int, message: dict):
         """
@@ -155,14 +151,12 @@ class ConnectionManager:
             for connection in self.restaurant_connections[restaurant_id]:
                 try:
                     await connection.send_json(message)
-                    print(f"📤 Sent status update to restaurant {restaurant_id}: {message.get('status')}")
                 except Exception as e:
-                    print(f"❌ Failed to send status update: {e}")
                     disconnected.add(connection)
             for connection in disconnected:
                 self.restaurant_connections[restaurant_id].discard(connection)
         else:
-            print(f"⚠️ No active connections for restaurant {restaurant_id}")
+            pass
 
     async def broadcast_to_delivery_partners(self, message: dict):
         """
@@ -175,7 +169,6 @@ class ConnectionManager:
                 try:
                     await connection.send_json(message)
                 except Exception as e:
-                    print(f"❌ Failed to send to delivery partner: {e}")
                     disconnected.add(connection)
             for connection in disconnected:
                 self.restaurant_connections[0].discard(connection)
