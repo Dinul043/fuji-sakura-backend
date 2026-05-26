@@ -174,3 +174,22 @@ async def set_default_address(
     db.commit()
 
     return address.to_dict()
+
+
+# ── Public Platform Settings (read-only for restaurants/partners) ──────────────
+
+@router.get("/platform-info")
+def get_platform_info(db: Session = Depends(get_db)):
+    """
+    Get current platform settings and tax categories.
+    Public endpoint — restaurants and delivery partners can view this.
+    """
+    from app.models.platform_settings import PlatformSetting, TaxCategory
+
+    settings = PlatformSetting.get_all(db)
+    categories = TaxCategory.get_all_active(db)
+
+    return {
+        "settings": {s.setting_key: {"value": s.setting_value, "description": s.description, "updated_at": s.updated_at.isoformat() if s.updated_at else None} for s in settings},
+        "tax_categories": [c.to_dict() for c in categories],
+    }
