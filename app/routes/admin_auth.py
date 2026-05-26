@@ -1374,55 +1374,22 @@ async def update_platform_setting(data: UpdateSettingRequest, authorization: str
 
     record = PlatformSetting.set(db, data.key, data.value, admin_id=admin.id)
 
-    # Send email notification to all approved restaurants if relevant settings change
+    # Notify restaurants via WebSocket (real-time banner on their dashboard)
     notify_keys = ['delivery_fee', 'default_gst_rate', 'platform_fee', 'cod_limit']
-    if data.key in notify_keys and old_value != data.value:
-        try:
-            from app.models.restaurant_application import RestaurantApplication, ApplicationStatus
-            from app.utils.email import send_otp_email  # Reuse email utility
-            restaurants = db.query(RestaurantApplication).filter(
-                RestaurantApplication.status == ApplicationStatus.APPROVED
-            ).all()
-            # Send notification email (best effort, don't block)
-            for r in restaurants:
-                try:
-                    import smtplib
-                    from email.mime.text import MIMEText
-                    from app.core.config import settings as app_settings
-                    
-                    subject = f"Fuji Sakura — Platform Setting Updated: {data.key}"
-                    body = f"""Dear {r.owner_name},
-
-This is to inform you that a platform setting has been updated:
-
-Setting: {data.key.replace('_', ' ').title()}
-Previous Value: {old_value}
-New Value: {data.value}
-
-This change is effective immediately.
-
-— Fuji Sakura Admin Team"""
-                    
-                    msg = MIMEText(body)
-                    msg['Subject'] = subject
-                    msg['From'] = app_settings.MAIL_FROM
-                    msg['To'] = r.email
-                    
-                    with smtplib.SMTP(app_settings.MAIL_SERVER, app_settings.MAIL_PORT) as server:
-                        server.starttls()
-                        server.login(app_settings.MAIL_USERNAME, app_settings.MAIL_PASSWORD)
-                        server.send_message(msg)
-                except Exception:
-                    pass  # Don't block on email failure
-        except Exception:
-            pass  # Don't block settings update on notification failure
-
-    # Send WebSocket notification to all restaurant dashboards
     if data.key in notify_keys and old_value != data.value:
         try:
             from app.utils.websocket_manager import manager
             from app.models.restaurant_application import RestaurantApplication
-            # Notify all restaurants via WebSocket
+            for r in db.query(RestaurantApplication).filter(RestaurantApplication.status == 1).all():
+                await manager.send_restaurant_notification(r.id, {
+                    "type": "platform_setting_updated",
+                    "setting": data.key,
+                    "old_value": old_value,
+                    "new_value": data.value,
+                    "message": f"Platform setting updated: {data.key.replace('_', ' ').title()} changed from {old_value} to {data.value}"
+                })
+        except Exception:
+            pass
             for r in db.query(RestaurantApplication).filter(RestaurantApplication.status == 1).all():
                 await manager.send_restaurant_notification(r.id, {
                     "type": "platform_setting_updated",
@@ -1435,9 +1402,6 @@ This change is effective immediately.
             pass  # Don't block on WebSocket failure
 
     return {"message": f"Setting '{data.key}' updated to '{data.value}'", "setting": record.to_dict()}
-
-
-# ── Tax Categories Management ──────────────────────────────────────────────────
 
 @router.get("/tax-categories")
 def get_tax_categories(authorization: str = Header(None), db: Session = Depends(get_db)):
@@ -1492,12 +1456,14 @@ async def update_tax_category(data: UpdateTaxCategoryRequest, authorization: str
     db.commit()
     db.refresh(record)
 
-    # Notify restaurants if tax rate changed
+    # Notify restaurants if tax rate changed (WebSocket only — no email)
     if data.tax_percent is not None and old_percent is not None and data.tax_percent != old_percent:
         try:
             from app.utils.websocket_manager import manager
             from app.models.restaurant_application import RestaurantApplication
-            for r in db.query(RestaurantApplication).filter(RestaurantApplication.status == 1).all():
+            restaurants = db.query(RestaurantApplication).filter(RestaurantApplication.status == 1).all()
+            
+            for r in restaurants:
                 await manager.send_restaurant_notification(r.id, {
                     "type": "platform_setting_updated",
                     "setting": f"tax_{data.name}",
