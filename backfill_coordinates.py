@@ -54,7 +54,7 @@ def backfill_restaurants(db: Session):
 
 def backfill_partners(db: Session):
     """Geocode delivery partners that have city/area but no coordinates."""
-    partners = db.query(DeliveryPartner).filter(
+    partners = db.query(DeliveryPartner).filter(s
         DeliveryPartner.latitude == None,
         DeliveryPartner.city != None,
         DeliveryPartner.city != ""
