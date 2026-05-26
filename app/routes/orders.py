@@ -89,10 +89,22 @@ async def create_order(
                         detail=f"Restaurant '{restaurant.business_name}' is {distance:.1f} km away. Maximum delivery distance is {RESTAURANT_RADIUS_KM} km."
                     )
 
-            # Calculate totals
+            # Calculate totals — use platform settings from DB
+            from app.models.platform_settings import PlatformSetting, TaxCategory
+            delivery_fee = PlatformSetting.get_float(db, 'delivery_fee', 40.0)
+            
             subtotal = sum(item.total_price for item in items)
-            delivery_fee = 40.00  # Fixed delivery fee — paid to delivery partner
-            tax_amount = subtotal * 0.08
+            
+            # Calculate tax per item based on tax category
+            total_tax = 0.0
+            from app.models.restaurant_menu import RestaurantMenu
+            for item in items:
+                menu_item = db.query(RestaurantMenu).filter(RestaurantMenu.id == item.menu_item_id).first()
+                item_category = menu_item.tax_category if menu_item and hasattr(menu_item, 'tax_category') and menu_item.tax_category else 'food'
+                tax_rate = TaxCategory.get_rate(db, item_category) / 100.0
+                total_tax += float(item.total_price) * tax_rate
+            
+            tax_amount = round(total_tax, 2)
             total_amount = subtotal + delivery_fee + tax_amount
             
             # Generate order number

@@ -1228,74 +1228,93 @@ async def retry_refund(
     """
     get_admin_from_token(authorization, db)
     from app.models.orders import Order, OrderStatus
+    from app.models.orders import PaymentStatus as OrderPaymentStatus
     from app.models.payment import Payment, PaymentStatus
     from app.services.razorpay_service import RazorpayService
 
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+    try:
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
 
-    if order.status != OrderStatus.CANCELLED:
-        raise HTTPException(status_code=400, detail="Order is not cancelled — refund not applicable")
+        if order.status != OrderStatus.CANCELLED:
+            raise HTTPException(status_code=400, detail="Order is not cancelled — refund not applicable")
 
-    if not order.payment_method or order.payment_method.upper() != 'ONLINE':
-        raise HTTPException(status_code=400, detail="This is a COD order — no refund needed")
+        if not order.payment_method or order.payment_method.upper() != 'ONLINE':
+            raise HTTPException(status_code=400, detail="This is a COD order — no refund needed")
 
-    payment = db.query(Payment).filter(
-        Payment.order_id == order.id,
-        Payment.gateway_payment_id != None
-    ).first()
+        payment = db.query(Payment).filter(
+            Payment.order_id == order.id,
+            Payment.gateway_payment_id != None
+        ).first()
 
-    if not payment:
-        raise HTTPException(status_code=404, detail="No payment record found for this order")
+        if not payment:
+            raise HTTPException(status_code=404, detail="No payment record found for this order")
 
-    # Check if already refunded
-    if str(payment.payment_status.value).upper() == 'REFUNDED':
-        return {"message": "Already refunded", "status": "already_refunded"}
+        # Check if already refunded
+        if str(payment.payment_status.value).upper() == 'REFUNDED':
+            return {"message": "Already refunded", "status": "already_refunded"}
 
-    # Attempt refund
-    razorpay = RazorpayService()
-    result = razorpay.refund_payment(
-        payment_id=payment.gateway_payment_id,
-        amount=order.total_amount
-    )
+        # Attempt refund
+        razorpay = RazorpayService()
+        result = razorpay.refund_payment(
+            payment_id=payment.gateway_payment_id,
+            amount=order.total_amount
+        )
 
-    if result.get('success'):
-        payment.payment_status = PaymentStatus.REFUNDED
-        payment.failure_reason = "Order cancelled — refund initiated by admin"
-        order.payment_status = PaymentStatus.REFUNDED
-        db.commit()
-        print(f"✅ Admin retry refund successful for order {order.order_number}: {result['refund'].get('id')}")
-        return {
-            "message": f"Refund of ₹{order.total_amount} initiated successfully",
-            "refund_id": result['refund'].get('id'),
-            "order_number": order.order_number,
-            "amount": order.total_amount
-        }
-    else:
-        error = result.get('error', 'Unknown error')
-        print(f"❌ Admin retry refund failed for order {order.order_number}: {error}")
+        if result.get('success'):
+            payment.payment_status = PaymentStatus.REFUNDED
+            payment.failure_reason = "Order cancelled — refund initiated by admin"
+            order.payment_status = OrderPaymentStatus.REFUNDED
+            db.commit()
+            print(f"✅ Admin retry refund successful for order {order.order_number}: {result['refund'].get('id')}")
+            return {
+                "message": f"Refund of ₹{order.total_amount} initiated successfully",
+                "refund_id": result['refund'].get('id'),
+                "order_number": order.order_number,
+                "amount": order.total_amount
+            }
+        else:
+            error = result.get('error', 'Unknown error')
+            print(f"❌ Admin retry refund failed for order {order.order_number}: {error}")
 
-        # If Razorpay says "invalid request" it may mean already refunded on their side
-        # Check Razorpay directly to confirm
-        try:
-            razorpay2 = RazorpayService()
-            p_detail = razorpay2.client.payment.fetch(payment.gateway_payment_id)
-            if p_detail.get('amount_refunded', 0) > 0:
-                # Already refunded on Razorpay side — sync DB
+            # If error says "already refunded" — just mark as refunded in DB
+            if 'already' in error.lower() and 'refund' in error.lower():
                 payment.payment_status = PaymentStatus.REFUNDED
-                payment.failure_reason = "Refund confirmed via Razorpay payment check"
-                order.payment_status = PaymentStatus.REFUNDED
+                payment.failure_reason = "Refund confirmed — Razorpay reports already refunded"
+                order.payment_status = OrderPaymentStatus.REFUNDED
                 db.commit()
                 return {
-                    "message": f"Refund already processed by Razorpay — DB updated",
+                    "message": f"Payment already refunded on Razorpay — DB synced",
                     "order_number": order.order_number,
                     "amount": order.total_amount
                 }
-        except Exception:
-            pass
 
-        raise HTTPException(status_code=500, detail=f"Refund failed: {error}")
+            # Check Razorpay directly to confirm
+            try:
+                razorpay2 = RazorpayService()
+                p_detail = razorpay2.client.payment.fetch(payment.gateway_payment_id)
+                if p_detail.get('amount_refunded', 0) > 0:
+                    payment.payment_status = PaymentStatus.REFUNDED
+                    payment.failure_reason = "Refund confirmed via Razorpay payment check"
+                    order.payment_status = OrderPaymentStatus.REFUNDED
+                    db.commit()
+                    return {
+                        "message": f"Refund already processed by Razorpay — DB updated",
+                        "order_number": order.order_number,
+                        "amount": order.total_amount
+                    }
+            except Exception as check_err:
+                print(f"⚠️ Razorpay payment check failed: {check_err}")
+
+            raise HTTPException(status_code=400, detail=f"Refund could not be processed: {error}. Please check Razorpay dashboard manually.")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Unexpected error in retry-refund for order {order_id}: {e}")
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Refund failed due to an unexpected error: {str(e)}")
 
 
 # ── Admin Refresh Token ────────────────────────────────────────────────────
@@ -1327,3 +1346,130 @@ def admin_refresh(data: AdminRefreshRequest, db: Session = Depends(get_db)):
     )
 
     return {"access_token": new_access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
+
+
+# ── Platform Settings Management ───────────────────────────────────────────────
+
+@router.get("/settings")
+def get_platform_settings(authorization: str = Header(None), db: Session = Depends(get_db)):
+    """Get all platform settings — admin only."""
+    get_admin_from_token(authorization, db)
+    from app.models.platform_settings import PlatformSetting
+    settings = PlatformSetting.get_all(db)
+    return {"settings": [s.to_dict() for s in settings]}
+
+
+class UpdateSettingRequest(BaseModel):
+    key: str
+    value: str
+
+@router.put("/settings")
+def update_platform_setting(data: UpdateSettingRequest, authorization: str = Header(None), db: Session = Depends(get_db)):
+    """Update a platform setting — admin only. Notifies affected restaurants via email."""
+    admin = get_admin_from_token(authorization, db)
+    from app.models.platform_settings import PlatformSetting
+
+    old_record = db.query(PlatformSetting).filter(PlatformSetting.setting_key == data.key).first()
+    old_value = old_record.setting_value if old_record else None
+
+    record = PlatformSetting.set(db, data.key, data.value, admin_id=admin.id)
+
+    # Send email notification to all approved restaurants if relevant settings change
+    notify_keys = ['delivery_fee', 'default_gst_rate', 'platform_fee', 'cod_limit']
+    if data.key in notify_keys and old_value != data.value:
+        try:
+            from app.models.restaurant_application import RestaurantApplication, ApplicationStatus
+            from app.utils.email import send_otp_email  # Reuse email utility
+            restaurants = db.query(RestaurantApplication).filter(
+                RestaurantApplication.status == ApplicationStatus.APPROVED
+            ).all()
+            # Send notification email (best effort, don't block)
+            for r in restaurants:
+                try:
+                    # Simple notification — reuse existing email function pattern
+                    import smtplib
+                    from email.mime.text import MIMEText
+                    from app.core.config import settings as app_settings
+                    
+                    subject = f"Fuji Sakura — Platform Setting Updated: {data.key}"
+                    body = f"""Dear {r.owner_name},
+
+This is to inform you that a platform setting has been updated:
+
+Setting: {data.key.replace('_', ' ').title()}
+Previous Value: {old_value}
+New Value: {data.value}
+
+This change is effective immediately.
+
+— Fuji Sakura Admin Team"""
+                    
+                    msg = MIMEText(body)
+                    msg['Subject'] = subject
+                    msg['From'] = app_settings.SMTP_FROM_EMAIL
+                    msg['To'] = r.email
+                    
+                    with smtplib.SMTP(app_settings.SMTP_HOST, app_settings.SMTP_PORT) as server:
+                        server.starttls()
+                        server.login(app_settings.SMTP_USERNAME, app_settings.SMTP_PASSWORD)
+                        server.send_message(msg)
+                except Exception:
+                    pass  # Don't block on email failure
+        except Exception:
+            pass  # Don't block settings update on notification failure
+
+    return {"message": f"Setting '{data.key}' updated to '{data.value}'", "setting": record.to_dict()}
+
+
+# ── Tax Categories Management ──────────────────────────────────────────────────
+
+@router.get("/tax-categories")
+def get_tax_categories(authorization: str = Header(None), db: Session = Depends(get_db)):
+    """Get all tax categories — admin only."""
+    get_admin_from_token(authorization, db)
+    from app.models.platform_settings import TaxCategory
+    categories = TaxCategory.get_all_active(db)
+    return {"categories": [c.to_dict() for c in categories]}
+
+
+class UpdateTaxCategoryRequest(BaseModel):
+    name: str
+    display_name: Optional[str] = None
+    tax_percent: Optional[float] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+@router.put("/tax-categories")
+def update_tax_category(data: UpdateTaxCategoryRequest, authorization: str = Header(None), db: Session = Depends(get_db)):
+    """Update or create a tax category — admin only."""
+    admin = get_admin_from_token(authorization, db)
+    from app.models.platform_settings import TaxCategory
+
+    record = db.query(TaxCategory).filter(TaxCategory.name == data.name).first()
+    if record:
+        if data.display_name is not None:
+            record.display_name = data.display_name
+        if data.tax_percent is not None:
+            if not (0 <= data.tax_percent <= 50):
+                raise HTTPException(status_code=400, detail="Tax percent must be between 0 and 50")
+            record.tax_percent = data.tax_percent
+        if data.description is not None:
+            record.description = data.description
+        if data.is_active is not None:
+            record.is_active = data.is_active
+    else:
+        # Create new category
+        if data.tax_percent is None:
+            raise HTTPException(status_code=400, detail="tax_percent is required for new category")
+        record = TaxCategory(
+            name=data.name,
+            display_name=data.display_name or data.name.replace('_', ' ').title(),
+            tax_percent=data.tax_percent,
+            description=data.description,
+            is_active=data.is_active if data.is_active is not None else True,
+        )
+        db.add(record)
+
+    db.commit()
+    db.refresh(record)
+    return {"message": f"Tax category '{data.name}' updated", "category": record.to_dict()}

@@ -799,6 +799,10 @@ async def get_public_restaurants(
         )
         filter_radius = radius if radius else RESTAURANT_RADIUS_KM
 
+        # Get delivery fee from platform settings
+        from app.models.platform_settings import PlatformSetting
+        platform_delivery_fee = PlatformSetting.get_float(db, 'delivery_fee', 40.0)
+
         restaurants_data = []
         from app.models.review import Review
         for restaurant in approved_restaurants:
@@ -861,7 +865,7 @@ async def get_public_restaurants(
                 "average_price": avg_price,
                 "created_at": restaurant.created_at.isoformat() if restaurant.created_at else None,
                 "delivery_time": delivery_time,
-                "delivery_fee": 40.0,
+                "delivery_fee": platform_delivery_fee,
                 "rating": real_rating,
                 "reviews": real_review_count,
                 "image": "🍽️",
@@ -958,7 +962,7 @@ async def get_public_restaurant_details(restaurant_id: int, db: Session = Depend
             "average_price": avg_price,
             "rating": real_rating,
             "delivery_time": f"{20 + (restaurant.id % 20)}-{30 + (restaurant.id % 20)} min",
-            "delivery_fee": 40.0,
+            "delivery_fee": platform_delivery_fee,
             "reviews": real_review_count,
             "image": "🍽️",
             "tags": [restaurant.cuisine_type, "Popular", "Fast Delivery"],

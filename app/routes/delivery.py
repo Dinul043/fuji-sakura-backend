@@ -486,10 +486,11 @@ async def accept_order(order_id: int, authorization: str = FastAPIHeader(None), 
 
     # COD limit check — use calculate_cod_due for accurate net due
     # Block if net COD due >= 1500 AND this is a COD order
-    # Single order exception: if this single order > 1500, still allow it
+    # Single order exception: if this single order > limit, still allow it
     if order.payment_method and order.payment_method.lower() == 'cod':
+        cod_limit = get_cod_limit(db)
         net_cod_due = calculate_cod_due(partner.id, db)
-        if net_cod_due >= COD_LIMIT and order.total_amount <= COD_LIMIT:
+        if net_cod_due >= cod_limit and order.total_amount <= cod_limit:
             raise HTTPException(
                 status_code=400,
                 detail=f"COD limit reached. You have ₹{net_cod_due:.0f} net COD due. Please settle via the Settle COD page before accepting more COD orders."
@@ -614,7 +615,8 @@ async def complete_order(order_id: int, authorization: str = FastAPIHeader(None)
 
     # Record delivery earnings — dedup protected
     from app.models.delivery_partner import DeliveryEarning
-    DELIVERY_FEE = 40.00
+    from app.models.platform_settings import PlatformSetting
+    DELIVERY_FEE = PlatformSetting.get_float(db, 'delivery_fee', 40.0)
 
     existing_earning = db.query(DeliveryEarning).filter(DeliveryEarning.order_id == order.id).first()
     if not existing_earning:
@@ -833,7 +835,12 @@ def update_delivery_profile(
     return {"message": "Profile updated", "partner": partner.to_dict()}
 
 
-COD_LIMIT = 1500.00  # Max COD a partner can hold before being blocked
+COD_LIMIT = None  # Will be read from DB at runtime
+
+def get_cod_limit(db) -> float:
+    """Get COD limit from platform settings."""
+    from app.models.platform_settings import PlatformSetting
+    return PlatformSetting.get_float(db, 'cod_limit', 1500.0)
 
 
 # ── COD Settlement via Razorpay ────────────────────────────────────────────
@@ -1053,7 +1060,7 @@ async def verify_cod_settlement(
         "amount_paid": float(settlement.amount),
         "before_cod_due": float(settlement.before_cod_due),
         "after_cod_due": cod_due_after,
-        "orders_unblocked": cod_due_after < COD_LIMIT
+        "orders_unblocked": cod_due_after < get_cod_limit(db)
     }
 
 
