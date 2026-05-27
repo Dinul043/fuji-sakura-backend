@@ -884,6 +884,7 @@ async def get_public_restaurants(
 async def get_public_restaurant_details(restaurant_id: int, db: Session = Depends(get_db)):
     """Get specific restaurant details with menu for customer-facing pages"""
     try:
+        from app.models.platform_settings import PlatformSetting
         # Get restaurant details
         restaurant = db.query(RestaurantApplication).filter(
             RestaurantApplication.id == restaurant_id,
@@ -943,7 +944,7 @@ async def get_public_restaurant_details(restaurant_id: int, db: Session = Depend
             "average_price": avg_price,
             "rating": real_rating,
             "delivery_time": f"{20 + (restaurant.id % 20)}-{30 + (restaurant.id % 20)} min",
-            "delivery_fee": platform_delivery_fee,
+            "delivery_fee": PlatformSetting.get_float(db, 'delivery_fee', 40.0),
             "reviews": real_review_count,
             "image": "🍽️",
             "tags": [restaurant.cuisine_type, "Popular", "Fast Delivery"],
