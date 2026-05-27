@@ -68,6 +68,7 @@ class UserResponse(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None
     token_type: str
     user: UserResponse
 
@@ -423,10 +424,10 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
         # Note: updated_at should only change when profile data changes
         db.commit()
         
-        # Access token: 1 hour (refresh token handles session persistence)
+        # Access token: 30 seconds for testing (change back to 1 hour for production)
         access_token = create_access_token(
             data={"sub": str(user.id)}, 
-            expires_delta=timedelta(hours=1)
+            expires_delta=timedelta(seconds=30)
         )
 
         # Refresh token: long-lived based on rememberMe
