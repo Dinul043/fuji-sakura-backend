@@ -349,12 +349,22 @@ def verify_otp(otp_data: OTPVerification, db: Session = Depends(get_db)):
         db.commit()
         
         # Create access token
-        access_token = create_access_token(data={"sub": str(user.id)})
+        access_token = create_access_token(
+            data={"sub": str(user.id)},
+            expires_delta=timedelta(hours=1)
+        )
+        
+        # Create refresh token (default 1 day for new signups)
+        from app.utils.security import create_refresh_token_for_entity
+        refresh_token = create_refresh_token_for_entity(
+            entity_id=user.id, role="user", db=db, expires_delta=timedelta(days=1)
+        )
         
         logger.info(f"✅ OTP verified successfully for {otp_data.email} - Tokens cleared")
         
         return {
             "access_token": access_token,
+            "refresh_token": refresh_token,
             "token_type": "bearer",
             "user": {
                 "id": user.id,
