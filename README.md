@@ -23,20 +23,25 @@ venv\Scripts\activate  # Windows
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Create MySQL database
-mysql -u root -p
-CREATE DATABASE fuji_sakura_db;
-EXIT;
-
-# 5. Configure environment
+# 4. Configure environment
 cp .env.example .env
-# Edit .env with your database credentials, Razorpay keys, and SMTP settings
+# Edit .env — set DATABASE_URL with your MySQL credentials:
+#   With password:    mysql+pymysql://root:yourpassword@localhost:3306/fuji_sakura_db
+#   Without password: mysql+pymysql://root:@localhost:3306/fuji_sakura_db
+
+# 5. Run setup script (creates DB, tables, default admin)
+python setup_database.py
 
 # 6. Run the server
 python main.py
 ```
 
 Server starts at: `http://localhost:8000`
+
+### Default Admin Account (created by setup script)
+- Email: `admin@fujisakura.com`
+- Password: `Admin@123`
+- **Change this after first login!**
 
 ## Environment Variables
 
