@@ -23,6 +23,9 @@ venv\Scripts\activate  # Windows
 # 3. Install dependencies
 pip install -r requirements.txt
 
+# NOTE for Windows users: If bcrypt fails, install Microsoft C++ Build Tools first
+# Or run: pip install bcrypt --only-binary :all:
+
 # 4. Configure environment
 cp .env.example .env
 # Edit .env — set DATABASE_URL with your MySQL credentials:
