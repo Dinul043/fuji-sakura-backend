@@ -105,7 +105,8 @@ async def create_order(
                 total_tax += float(item.total_price) * tax_rate
             
             tax_amount = round(total_tax, 2)
-            total_amount = subtotal + delivery_fee + tax_amount
+            platform_fee = PlatformSetting.get_float(db, 'platform_fee', 0.0)
+            total_amount = subtotal + delivery_fee + tax_amount + platform_fee
             
             # Generate order number
             # Generate unique order number using max ID to avoid duplicates after deletions
