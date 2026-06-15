@@ -413,28 +413,25 @@ def get_available_orders(authorization: str = FastAPIHeader(None), db: Session =
 
     if use_location:
         # Find restaurants within delivery radius of partner's live location
+        # Also include restaurants without coordinates that match city/area
         all_restaurants = db.query(RestaurantApplication).filter(
             RestaurantApplication.status == 1,
-            RestaurantApplication.latitude.isnot(None),
-            RestaurantApplication.longitude.isnot(None),
         ).all()
         
         restaurant_ids = []
         for r in all_restaurants:
-            dist = haversine_distance(
-                float(partner.live_latitude), float(partner.live_longitude),
-                float(r.latitude), float(r.longitude)
-            )
-            if dist <= DELIVERY_RADIUS_KM:
-                restaurant_ids.append(r.id)
-        
-        if not restaurant_ids:
-            # Fallback: also include city/area match in case restaurants don't have coordinates
-            city_restaurants = db.query(RestaurantApplication.id).filter(
-                RestaurantApplication.city == partner.city,
-                RestaurantApplication.status == 1
-            ).all()
-            restaurant_ids = [r[0] for r in city_restaurants]
+            if r.latitude is not None and r.longitude is not None:
+                # Has coordinates — use distance check
+                dist = haversine_distance(
+                    float(partner.live_latitude), float(partner.live_longitude),
+                    float(r.latitude), float(r.longitude)
+                )
+                if dist <= DELIVERY_RADIUS_KM:
+                    restaurant_ids.append(r.id)
+            else:
+                # No coordinates — include if same city (fallback)
+                if r.city and partner.city and r.city.lower() == partner.city.lower():
+                    restaurant_ids.append(r.id)
     else:
         # Fallback: city + area string matching (original behavior)
         restaurant_query = db.query(RestaurantApplication.id).filter(
